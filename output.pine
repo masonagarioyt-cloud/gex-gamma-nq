@@ -2,9 +2,9 @@
 indicator("NQ GEX Levels (Auto-Generated, Free Data Estimate)", overlay=true, max_lines_count=100, max_labels_count=100)
 
 // ============================================================
-// AUTO-GENERATED — 2026-07-16 23:01 UTC
+// AUTO-GENERATED — 2026-07-16 23:11 UTC
 // Source: QQQ options chain (free/unofficial). Main expiry: 2026-07-17, 0DTE: 2026-07-16
-// QQQ spot at calc time: 705.94 | NQ spot at calc time: 29133.25
+// QQQ spot at calc time: 705.94 | NQ spot at calc time: 29129.50
 // FREE-DATA ESTIMATE using the standard public GEX convention
 // (dealers long calls / short puts). NOT SpotGamma's or
 // MenthorQ's proprietary model. "Strength %" = this level's
@@ -16,42 +16,69 @@ labelSizeInput = input.string("Normal", "Labels Text Size", options=["Small", "N
 labelPosInput = input.string("Above", "Label Position", options=["Above", "Below", "Left", "Right"], group="Display")
 offsetBars = input.int(3, "Left/Right Offset (bars)", minval=0, maxval=200, group="Display")
 showPctInput = input.bool(true, "Show % on labels", group="Display")
-mergeWithinInput = input.float(0.0, "Merge levels within (pts)", minval=0.0, group="Display")
+mergeWithinInput = input.float(15.0, "Merge levels within (pts)", minval=0.0, tooltip="When two levels land within this many points of each other, only the higher-priority one is shown, to reduce clutter. Set to 0 to show every level.", group="Display")
 lineWidthInput = input.int(3, "Line Width", minval=1, maxval=6, group="Display")
 
 f_labelSize(s) =>
     s == "Small" ? size.small : s == "Large" ? size.large : size.normal
 f_labelStyle(p) =>
-    p == "Below" ? label.style_label_down : p == "Left" ? label.style_label_left : p == "Right" ? label.style_label_right : label.style_label_up
+    p == "Below" ? label.style_label_up : p == "Left" ? label.style_label_right : p == "Right" ? label.style_label_left : label.style_label_down
 resolvedSize = f_labelSize(labelSizeInput)
 resolvedStyle = f_labelStyle(labelPosInput)
 
-show_lvl0 = input.bool(true, "Call Wall", group="Level Filters")
-show_lvl1 = input.bool(true, "Put Wall", group="Level Filters")
-show_lvl2 = input.bool(true, "Gamma Flip", group="Level Filters")
-show_lvl3 = input.bool(true, "Gamma Wall", group="Level Filters")
-show_lvl4 = input.bool(true, "Call Resistance (OI)", group="Level Filters")
-show_lvl5 = input.bool(true, "Put Support (OI)", group="Level Filters")
-show_lvl6 = input.bool(true, "Call Resistance 0DTE", group="Level Filters")
-show_lvl7 = input.bool(true, "Put Support 0DTE", group="Level Filters")
-show_lvl8 = input.bool(true, "Gamma Wall 0DTE", group="Level Filters")
-show_lvl9 = input.bool(true, "Call Resistance 0DTE (OI)", group="Level Filters")
-show_lvl10 = input.bool(true, "Put Support 0DTE (OI)", group="Level Filters")
-show_lvl11 = input.bool(true, "GEX 1", group="GEX Filters")
-show_lvl12 = input.bool(true, "GEX 2", group="GEX Filters")
-show_lvl13 = input.bool(true, "GEX 3", group="GEX Filters")
-show_lvl14 = input.bool(true, "GEX 4", group="GEX Filters")
-show_lvl15 = input.bool(true, "GEX 5", group="GEX Filters")
-show_lvl16 = input.bool(true, "GEX 6", group="GEX Filters")
-show_lvl17 = input.bool(true, "GEX 7", group="GEX Filters")
-show_lvl18 = input.bool(true, "GEX 8", group="GEX Filters")
-show_lvl19 = input.bool(true, "GEX 1 0DTE", group="GEX Filters")
-show_lvl20 = input.bool(true, "GEX 2 0DTE", group="GEX Filters")
-show_lvl21 = input.bool(true, "GEX 3 0DTE", group="GEX Filters")
-show_lvl22 = input.bool(true, "GEX 4 0DTE", group="GEX Filters")
-show_lvl23 = input.bool(true, "GEX 5 0DTE", group="GEX Filters")
-show_lvl24 = input.bool(true, "1D Expected Move High", group="Level Filters")
-show_lvl25 = input.bool(true, "1D Expected Move Low", group="Level Filters")
+show_lvl0 = input.bool(true, "Call Wall", group="Level Filters", tooltip="Strike with the largest positive gamma exposure. Often acts like resistance - price stalling or reversing down here is common.")
+show_lvl1 = input.bool(true, "Put Wall", group="Level Filters", tooltip="Strike with the largest negative gamma exposure. Often acts like support - price stalling or reversing up here is common.")
+show_lvl2 = input.bool(true, "Gamma Flip", group="Level Filters", tooltip="The price where dealer hedging flips character. Below it, hedging tends to amplify moves (more volatile). Above it, hedging tends to dampen moves (more range-bound). A regime marker, not a wall.")
+show_lvl3 = input.bool(true, "Gamma Wall", group="Level Filters", tooltip="Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction.")
+show_lvl4 = input.bool(true, "Call Resistance (OI)", group="Level Filters", tooltip="Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure.")
+show_lvl5 = input.bool(true, "Put Support (OI)", group="Level Filters", tooltip="Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure.")
+show_lvl6 = input.bool(true, "Call Resistance 0DTE", group="Level Filters", tooltip="Same concept as Call Wall, but calculated using only options expiring today (0DTE).")
+show_lvl7 = input.bool(true, "Put Support 0DTE", group="Level Filters", tooltip="Same concept as Put Wall, but calculated using only options expiring today (0DTE).")
+show_lvl8 = input.bool(true, "Gamma Wall 0DTE", group="Level Filters", tooltip="Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction. Calculated using only today's expiring options.")
+show_lvl9 = input.bool(true, "Call Resistance 0DTE (OI)", group="Level Filters", tooltip="Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure. Today's expiry only.")
+show_lvl10 = input.bool(true, "Put Support 0DTE (OI)", group="Level Filters", tooltip="Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure. Today's expiry only.")
+show_lvl11 = input.bool(true, "GEX 1", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl12 = input.bool(true, "GEX 2", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl13 = input.bool(true, "GEX 3", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl14 = input.bool(true, "GEX 4", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl15 = input.bool(true, "GEX 5", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl16 = input.bool(true, "GEX 6", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl17 = input.bool(true, "GEX 7", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl18 = input.bool(true, "GEX 8", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number).")
+show_lvl19 = input.bool(true, "GEX 1 0DTE", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number). Today's expiry only.")
+show_lvl20 = input.bool(true, "GEX 2 0DTE", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number). Today's expiry only.")
+show_lvl21 = input.bool(true, "GEX 3 0DTE", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number). Today's expiry only.")
+show_lvl22 = input.bool(true, "GEX 4 0DTE", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number). Today's expiry only.")
+show_lvl23 = input.bool(true, "GEX 5 0DTE", group="GEX Filters", tooltip="A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number). Today's expiry only.")
+show_lvl24 = input.bool(true, "1D Expected Move High", group="Level Filters", tooltip="Estimated 1-day price range based on implied volatility. A statistical estimate, not a hard boundary.")
+show_lvl25 = input.bool(true, "1D Expected Move Low", group="Level Filters", tooltip="Estimated 1-day price range based on implied volatility. A statistical estimate, not a hard boundary.")
+
+col_lvl0 = input.color(color.green, "Call Wall Color", group="Colors")
+col_lvl1 = input.color(color.red, "Put Wall Color", group="Colors")
+col_lvl2 = input.color(color.orange, "Gamma Flip Color", group="Colors")
+col_lvl3 = input.color(color.white, "Gamma Wall Color", group="Colors")
+col_lvl4 = input.color(color.lime, "Call Resistance (OI) Color", group="Colors")
+col_lvl5 = input.color(color.maroon, "Put Support (OI) Color", group="Colors")
+col_lvl6 = input.color(color.new(color.red, 20), "Call Resistance 0DTE Color", group="Colors")
+col_lvl7 = input.color(color.new(color.teal, 20), "Put Support 0DTE Color", group="Colors")
+col_lvl8 = input.color(color.silver, "Gamma Wall 0DTE Color", group="Colors")
+col_lvl9 = input.color(color.new(color.lime, 20), "Call Resistance 0DTE (OI) Color", group="Colors")
+col_lvl10 = input.color(color.new(color.maroon, 20), "Put Support 0DTE (OI) Color", group="Colors")
+col_lvl11 = input.color(color.new(color.fuchsia, 10), "GEX 1 Color", group="Colors")
+col_lvl12 = input.color(color.new(color.fuchsia, 10), "GEX 2 Color", group="Colors")
+col_lvl13 = input.color(color.new(color.fuchsia, 10), "GEX 3 Color", group="Colors")
+col_lvl14 = input.color(color.new(color.fuchsia, 10), "GEX 4 Color", group="Colors")
+col_lvl15 = input.color(color.new(color.fuchsia, 10), "GEX 5 Color", group="Colors")
+col_lvl16 = input.color(color.new(color.fuchsia, 10), "GEX 6 Color", group="Colors")
+col_lvl17 = input.color(color.new(color.fuchsia, 10), "GEX 7 Color", group="Colors")
+col_lvl18 = input.color(color.new(color.fuchsia, 10), "GEX 8 Color", group="Colors")
+col_lvl19 = input.color(color.new(color.purple, 15), "GEX 1 0DTE Color", group="Colors")
+col_lvl20 = input.color(color.new(color.purple, 15), "GEX 2 0DTE Color", group="Colors")
+col_lvl21 = input.color(color.new(color.purple, 15), "GEX 3 0DTE Color", group="Colors")
+col_lvl22 = input.color(color.new(color.purple, 15), "GEX 4 0DTE Color", group="Colors")
+col_lvl23 = input.color(color.new(color.purple, 15), "GEX 5 0DTE Color", group="Colors")
+col_lvl24 = input.color(color.new(color.yellow, 30), "1D Expected Move High Color", group="Colors")
+col_lvl25 = input.color(color.new(color.yellow, 30), "1D Expected Move Low Color", group="Colors")
 
 var line ln_lvl0 = na
 var label lbl_lvl0 = na
@@ -114,310 +141,310 @@ if barstate.islast
     tooClose_lvl0 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29342.07 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29338.29 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl0 := true
     if show_lvl0 and not tooClose_lvl0
-        array.push(activePrices, 29342.07)
-        ln_lvl0 := line.new(bar_index - 10, 29342.07, bar_index, 29342.07, color=color.green, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29338.29)
+        ln_lvl0 := line.new(bar_index - 10, 29338.29, bar_index, 29338.29, color=col_lvl0, width=lineWidthInput, extend=extend.both)
         txt_lvl0 = showPctInput ? "Call Wall  100%" : "Call Wall"
-        lbl_lvl0 := label.new(bar_index + offsetBars, 29342.07, txt_lvl0, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.green, size=resolvedSize)
+        lbl_lvl0 := label.new(bar_index + offsetBars, 29338.29, txt_lvl0, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl0, size=resolvedSize)
     label.delete(lbl_lvl1)
     line.delete(ln_lvl1)
     tooClose_lvl1 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28888.11 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28884.40 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl1 := true
     if show_lvl1 and not tooClose_lvl1
-        array.push(activePrices, 28888.11)
-        ln_lvl1 := line.new(bar_index - 10, 28888.11, bar_index, 28888.11, color=color.red, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28884.40)
+        ln_lvl1 := line.new(bar_index - 10, 28884.40, bar_index, 28884.40, color=col_lvl1, width=lineWidthInput, extend=extend.both)
         txt_lvl1 = showPctInput ? "Put Wall  100%" : "Put Wall"
-        lbl_lvl1 := label.new(bar_index + offsetBars, 28888.11, txt_lvl1, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.red, size=resolvedSize)
+        lbl_lvl1 := label.new(bar_index + offsetBars, 28884.40, txt_lvl1, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl1, size=resolvedSize)
     label.delete(lbl_lvl2)
     line.delete(ln_lvl2)
     tooClose_lvl2 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29133.25 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29129.50 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl2 := true
     if show_lvl2 and not tooClose_lvl2
-        array.push(activePrices, 29133.25)
-        ln_lvl2 := line.new(bar_index - 10, 29133.25, bar_index, 29133.25, color=color.orange, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29129.50)
+        ln_lvl2 := line.new(bar_index - 10, 29129.50, bar_index, 29129.50, color=col_lvl2, width=lineWidthInput, extend=extend.both)
         txt_lvl2 = showPctInput ? "Gamma Flip  100%" : "Gamma Flip"
-        lbl_lvl2 := label.new(bar_index + offsetBars, 29133.25, txt_lvl2, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.orange, size=resolvedSize)
+        lbl_lvl2 := label.new(bar_index + offsetBars, 29129.50, txt_lvl2, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl2, size=resolvedSize)
     label.delete(lbl_lvl3)
     line.delete(ln_lvl3)
     tooClose_lvl3 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29342.07 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29338.29 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl3 := true
     if show_lvl3 and not tooClose_lvl3
-        array.push(activePrices, 29342.07)
-        ln_lvl3 := line.new(bar_index - 10, 29342.07, bar_index, 29342.07, color=color.white, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29338.29)
+        ln_lvl3 := line.new(bar_index - 10, 29338.29, bar_index, 29338.29, color=col_lvl3, width=lineWidthInput, extend=extend.both)
         txt_lvl3 = showPctInput ? "Gamma Wall  100%" : "Gamma Wall"
-        lbl_lvl3 := label.new(bar_index + offsetBars, 29342.07, txt_lvl3, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.white, size=resolvedSize)
+        lbl_lvl3 := label.new(bar_index + offsetBars, 29338.29, txt_lvl3, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl3, size=resolvedSize)
     label.delete(lbl_lvl4)
     line.delete(ln_lvl4)
     tooClose_lvl4 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(33014.99 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(33010.74 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl4 := true
     if show_lvl4 and not tooClose_lvl4
-        array.push(activePrices, 33014.99)
-        ln_lvl4 := line.new(bar_index - 10, 33014.99, bar_index, 33014.99, color=color.lime, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 33010.74)
+        ln_lvl4 := line.new(bar_index - 10, 33010.74, bar_index, 33010.74, color=col_lvl4, width=lineWidthInput, extend=extend.both)
         txt_lvl4 = showPctInput ? "Call Resistance (OI)  90%" : "Call Resistance (OI)"
-        lbl_lvl4 := label.new(bar_index + offsetBars, 33014.99, txt_lvl4, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.lime, size=resolvedSize)
+        lbl_lvl4 := label.new(bar_index + offsetBars, 33010.74, txt_lvl4, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl4, size=resolvedSize)
     label.delete(lbl_lvl5)
     line.delete(ln_lvl5)
     tooClose_lvl5 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(25999.30 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(25995.96 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl5 := true
     if show_lvl5 and not tooClose_lvl5
-        array.push(activePrices, 25999.30)
-        ln_lvl5 := line.new(bar_index - 10, 25999.30, bar_index, 25999.30, color=color.maroon, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 25995.96)
+        ln_lvl5 := line.new(bar_index - 10, 25995.96, bar_index, 25995.96, color=col_lvl5, width=lineWidthInput, extend=extend.both)
         txt_lvl5 = showPctInput ? "Put Support (OI)  90%" : "Put Support (OI)"
-        lbl_lvl5 := label.new(bar_index + offsetBars, 25999.30, txt_lvl5, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.maroon, size=resolvedSize)
+        lbl_lvl5 := label.new(bar_index + offsetBars, 25995.96, txt_lvl5, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl5, size=resolvedSize)
     label.delete(lbl_lvl6)
     line.delete(ln_lvl6)
     tooClose_lvl6 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28062.74 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28059.13 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl6 := true
     if show_lvl6 and not tooClose_lvl6
-        array.push(activePrices, 28062.74)
-        ln_lvl6 := line.new(bar_index - 10, 28062.74, bar_index, 28062.74, color=color.new(color.red, 20), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28059.13)
+        ln_lvl6 := line.new(bar_index - 10, 28059.13, bar_index, 28059.13, color=col_lvl6, width=lineWidthInput, extend=extend.both)
         txt_lvl6 = showPctInput ? "Call Resistance 0DTE  95%" : "Call Resistance 0DTE"
-        lbl_lvl6 := label.new(bar_index + offsetBars, 28062.74, txt_lvl6, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.red, 20), size=resolvedSize)
+        lbl_lvl6 := label.new(bar_index + offsetBars, 28059.13, txt_lvl6, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl6, size=resolvedSize)
     label.delete(lbl_lvl7)
     line.delete(ln_lvl7)
     tooClose_lvl7 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29094.46 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29090.71 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl7 := true
     if show_lvl7 and not tooClose_lvl7
-        array.push(activePrices, 29094.46)
-        ln_lvl7 := line.new(bar_index - 10, 29094.46, bar_index, 29094.46, color=color.new(color.teal, 20), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29090.71)
+        ln_lvl7 := line.new(bar_index - 10, 29090.71, bar_index, 29090.71, color=col_lvl7, width=lineWidthInput, extend=extend.both)
         txt_lvl7 = showPctInput ? "Put Support 0DTE  95%" : "Put Support 0DTE"
-        lbl_lvl7 := label.new(bar_index + offsetBars, 29094.46, txt_lvl7, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.teal, 20), size=resolvedSize)
+        lbl_lvl7 := label.new(bar_index + offsetBars, 29090.71, txt_lvl7, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl7, size=resolvedSize)
     label.delete(lbl_lvl8)
     line.delete(ln_lvl8)
     tooClose_lvl8 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29094.46 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29090.71 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl8 := true
     if show_lvl8 and not tooClose_lvl8
-        array.push(activePrices, 29094.46)
-        ln_lvl8 := line.new(bar_index - 10, 29094.46, bar_index, 29094.46, color=color.silver, width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29090.71)
+        ln_lvl8 := line.new(bar_index - 10, 29090.71, bar_index, 29090.71, color=col_lvl8, width=lineWidthInput, extend=extend.both)
         txt_lvl8 = showPctInput ? "Gamma Wall 0DTE  90%" : "Gamma Wall 0DTE"
-        lbl_lvl8 := label.new(bar_index + offsetBars, 29094.46, txt_lvl8, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.silver, size=resolvedSize)
+        lbl_lvl8 := label.new(bar_index + offsetBars, 29090.71, txt_lvl8, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl8, size=resolvedSize)
     label.delete(lbl_lvl9)
     line.delete(ln_lvl9)
     tooClose_lvl9 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(30126.18 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(30122.30 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl9 := true
     if show_lvl9 and not tooClose_lvl9
-        array.push(activePrices, 30126.18)
-        ln_lvl9 := line.new(bar_index - 10, 30126.18, bar_index, 30126.18, color=color.new(color.lime, 20), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 30122.30)
+        ln_lvl9 := line.new(bar_index - 10, 30122.30, bar_index, 30122.30, color=col_lvl9, width=lineWidthInput, extend=extend.both)
         txt_lvl9 = showPctInput ? "Call Resistance 0DTE (OI)  85%" : "Call Resistance 0DTE (OI)"
-        lbl_lvl9 := label.new(bar_index + offsetBars, 30126.18, txt_lvl9, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.lime, 20), size=resolvedSize)
+        lbl_lvl9 := label.new(bar_index + offsetBars, 30122.30, txt_lvl9, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl9, size=resolvedSize)
     label.delete(lbl_lvl10)
     line.delete(ln_lvl10)
     tooClose_lvl10 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28888.11 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28884.40 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl10 := true
     if show_lvl10 and not tooClose_lvl10
-        array.push(activePrices, 28888.11)
-        ln_lvl10 := line.new(bar_index - 10, 28888.11, bar_index, 28888.11, color=color.new(color.maroon, 20), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28884.40)
+        ln_lvl10 := line.new(bar_index - 10, 28884.40, bar_index, 28884.40, color=col_lvl10, width=lineWidthInput, extend=extend.both)
         txt_lvl10 = showPctInput ? "Put Support 0DTE (OI)  85%" : "Put Support 0DTE (OI)"
-        lbl_lvl10 := label.new(bar_index + offsetBars, 28888.11, txt_lvl10, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.maroon, 20), size=resolvedSize)
+        lbl_lvl10 := label.new(bar_index + offsetBars, 28884.40, txt_lvl10, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl10, size=resolvedSize)
     label.delete(lbl_lvl11)
     line.delete(ln_lvl11)
     tooClose_lvl11 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29259.53 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29255.77 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl11 := true
     if show_lvl11 and not tooClose_lvl11
-        array.push(activePrices, 29259.53)
-        ln_lvl11 := line.new(bar_index - 10, 29259.53, bar_index, 29259.53, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29255.77)
+        ln_lvl11 := line.new(bar_index - 10, 29255.77, bar_index, 29255.77, color=col_lvl11, width=lineWidthInput, extend=extend.both)
         txt_lvl11 = showPctInput ? "GEX 1  68%" : "GEX 1"
-        lbl_lvl11 := label.new(bar_index + offsetBars, 29259.53, txt_lvl11, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl11 := label.new(bar_index + offsetBars, 29255.77, txt_lvl11, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl11, size=resolvedSize)
     label.delete(lbl_lvl12)
     line.delete(ln_lvl12)
     tooClose_lvl12 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29094.46 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29090.71 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl12 := true
     if show_lvl12 and not tooClose_lvl12
-        array.push(activePrices, 29094.46)
-        ln_lvl12 := line.new(bar_index - 10, 29094.46, bar_index, 29094.46, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29090.71)
+        ln_lvl12 := line.new(bar_index - 10, 29090.71, bar_index, 29090.71, color=col_lvl12, width=lineWidthInput, extend=extend.both)
         txt_lvl12 = showPctInput ? "GEX 2  44%" : "GEX 2"
-        lbl_lvl12 := label.new(bar_index + offsetBars, 29094.46, txt_lvl12, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl12 := label.new(bar_index + offsetBars, 29090.71, txt_lvl12, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl12, size=resolvedSize)
     label.delete(lbl_lvl13)
     line.delete(ln_lvl13)
     tooClose_lvl13 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29300.80 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29297.03 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl13 := true
     if show_lvl13 and not tooClose_lvl13
-        array.push(activePrices, 29300.80)
-        ln_lvl13 := line.new(bar_index - 10, 29300.80, bar_index, 29300.80, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29297.03)
+        ln_lvl13 := line.new(bar_index - 10, 29297.03, bar_index, 29297.03, color=col_lvl13, width=lineWidthInput, extend=extend.both)
         txt_lvl13 = showPctInput ? "GEX 3  37%" : "GEX 3"
-        lbl_lvl13 := label.new(bar_index + offsetBars, 29300.80, txt_lvl13, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl13 := label.new(bar_index + offsetBars, 29297.03, txt_lvl13, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl13, size=resolvedSize)
     label.delete(lbl_lvl14)
     line.delete(ln_lvl14)
     tooClose_lvl14 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28681.77 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28678.08 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl14 := true
     if show_lvl14 and not tooClose_lvl14
-        array.push(activePrices, 28681.77)
-        ln_lvl14 := line.new(bar_index - 10, 28681.77, bar_index, 28681.77, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28678.08)
+        ln_lvl14 := line.new(bar_index - 10, 28678.08, bar_index, 28678.08, color=col_lvl14, width=lineWidthInput, extend=extend.both)
         txt_lvl14 = showPctInput ? "GEX 4  37%" : "GEX 4"
-        lbl_lvl14 := label.new(bar_index + offsetBars, 28681.77, txt_lvl14, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl14 := label.new(bar_index + offsetBars, 28678.08, txt_lvl14, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl14, size=resolvedSize)
     label.delete(lbl_lvl15)
     line.delete(ln_lvl15)
     tooClose_lvl15 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29507.14 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29503.35 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl15 := true
     if show_lvl15 and not tooClose_lvl15
-        array.push(activePrices, 29507.14)
-        ln_lvl15 := line.new(bar_index - 10, 29507.14, bar_index, 29507.14, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29503.35)
+        ln_lvl15 := line.new(bar_index - 10, 29503.35, bar_index, 29503.35, color=col_lvl15, width=lineWidthInput, extend=extend.both)
         txt_lvl15 = showPctInput ? "GEX 5  30%" : "GEX 5"
-        lbl_lvl15 := label.new(bar_index + offsetBars, 29507.14, txt_lvl15, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl15 := label.new(bar_index + offsetBars, 29503.35, txt_lvl15, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl15, size=resolvedSize)
     label.delete(lbl_lvl16)
     line.delete(ln_lvl16)
     tooClose_lvl16 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29053.19 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29049.45 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl16 := true
     if show_lvl16 and not tooClose_lvl16
-        array.push(activePrices, 29053.19)
-        ln_lvl16 := line.new(bar_index - 10, 29053.19, bar_index, 29053.19, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29049.45)
+        ln_lvl16 := line.new(bar_index - 10, 29049.45, bar_index, 29049.45, color=col_lvl16, width=lineWidthInput, extend=extend.both)
         txt_lvl16 = showPctInput ? "GEX 6  19%" : "GEX 6"
-        lbl_lvl16 := label.new(bar_index + offsetBars, 29053.19, txt_lvl16, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl16 := label.new(bar_index + offsetBars, 29049.45, txt_lvl16, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl16, size=resolvedSize)
     label.delete(lbl_lvl17)
     line.delete(ln_lvl17)
     tooClose_lvl17 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28475.43 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28471.76 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl17 := true
     if show_lvl17 and not tooClose_lvl17
-        array.push(activePrices, 28475.43)
-        ln_lvl17 := line.new(bar_index - 10, 28475.43, bar_index, 28475.43, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28471.76)
+        ln_lvl17 := line.new(bar_index - 10, 28471.76, bar_index, 28471.76, color=col_lvl17, width=lineWidthInput, extend=extend.both)
         txt_lvl17 = showPctInput ? "GEX 7  15%" : "GEX 7"
-        lbl_lvl17 := label.new(bar_index + offsetBars, 28475.43, txt_lvl17, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl17 := label.new(bar_index + offsetBars, 28471.76, txt_lvl17, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl17, size=resolvedSize)
     label.delete(lbl_lvl18)
     line.delete(ln_lvl18)
     tooClose_lvl18 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28970.65 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28966.92 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl18 := true
     if show_lvl18 and not tooClose_lvl18
-        array.push(activePrices, 28970.65)
-        ln_lvl18 := line.new(bar_index - 10, 28970.65, bar_index, 28970.65, color=color.new(color.fuchsia, 10), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28966.92)
+        ln_lvl18 := line.new(bar_index - 10, 28966.92, bar_index, 28966.92, color=col_lvl18, width=lineWidthInput, extend=extend.both)
         txt_lvl18 = showPctInput ? "GEX 8  15%" : "GEX 8"
-        lbl_lvl18 := label.new(bar_index + offsetBars, 28970.65, txt_lvl18, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.fuchsia, 10), size=resolvedSize)
+        lbl_lvl18 := label.new(bar_index + offsetBars, 28966.92, txt_lvl18, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl18, size=resolvedSize)
     label.delete(lbl_lvl19)
     line.delete(ln_lvl19)
     tooClose_lvl19 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29300.80 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29297.03 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl19 := true
     if show_lvl19 and not tooClose_lvl19
-        array.push(activePrices, 29300.80)
-        ln_lvl19 := line.new(bar_index - 10, 29300.80, bar_index, 29300.80, color=color.new(color.purple, 15), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29297.03)
+        ln_lvl19 := line.new(bar_index - 10, 29297.03, bar_index, 29297.03, color=col_lvl19, width=lineWidthInput, extend=extend.both)
         txt_lvl19 = showPctInput ? "GEX 1 0DTE  45%" : "GEX 1 0DTE"
-        lbl_lvl19 := label.new(bar_index + offsetBars, 29300.80, txt_lvl19, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.purple, 15), size=resolvedSize)
+        lbl_lvl19 := label.new(bar_index + offsetBars, 29297.03, txt_lvl19, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl19, size=resolvedSize)
     label.delete(lbl_lvl20)
     line.delete(ln_lvl20)
     tooClose_lvl20 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29507.14 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29503.35 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl20 := true
     if show_lvl20 and not tooClose_lvl20
-        array.push(activePrices, 29507.14)
-        ln_lvl20 := line.new(bar_index - 10, 29507.14, bar_index, 29507.14, color=color.new(color.purple, 15), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29503.35)
+        ln_lvl20 := line.new(bar_index - 10, 29503.35, bar_index, 29503.35, color=col_lvl20, width=lineWidthInput, extend=extend.both)
         txt_lvl20 = showPctInput ? "GEX 2 0DTE  13%" : "GEX 2 0DTE"
-        lbl_lvl20 := label.new(bar_index + offsetBars, 29507.14, txt_lvl20, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.purple, 15), size=resolvedSize)
+        lbl_lvl20 := label.new(bar_index + offsetBars, 29503.35, txt_lvl20, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl20, size=resolvedSize)
     label.delete(lbl_lvl21)
     line.delete(ln_lvl21)
     tooClose_lvl21 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28888.11 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28884.40 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl21 := true
     if show_lvl21 and not tooClose_lvl21
-        array.push(activePrices, 28888.11)
-        ln_lvl21 := line.new(bar_index - 10, 28888.11, bar_index, 28888.11, color=color.new(color.purple, 15), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28884.40)
+        ln_lvl21 := line.new(bar_index - 10, 28884.40, bar_index, 28884.40, color=col_lvl21, width=lineWidthInput, extend=extend.both)
         txt_lvl21 = showPctInput ? "GEX 3 0DTE  3%" : "GEX 3 0DTE"
-        lbl_lvl21 := label.new(bar_index + offsetBars, 28888.11, txt_lvl21, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.purple, 15), size=resolvedSize)
+        lbl_lvl21 := label.new(bar_index + offsetBars, 28884.40, txt_lvl21, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl21, size=resolvedSize)
     label.delete(lbl_lvl22)
     line.delete(ln_lvl22)
     tooClose_lvl22 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29713.49 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29709.66 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl22 := true
     if show_lvl22 and not tooClose_lvl22
-        array.push(activePrices, 29713.49)
-        ln_lvl22 := line.new(bar_index - 10, 29713.49, bar_index, 29713.49, color=color.new(color.purple, 15), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29709.66)
+        ln_lvl22 := line.new(bar_index - 10, 29709.66, bar_index, 29709.66, color=col_lvl22, width=lineWidthInput, extend=extend.both)
         txt_lvl22 = showPctInput ? "GEX 4 0DTE  3%" : "GEX 4 0DTE"
-        lbl_lvl22 := label.new(bar_index + offsetBars, 29713.49, txt_lvl22, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.purple, 15), size=resolvedSize)
+        lbl_lvl22 := label.new(bar_index + offsetBars, 29709.66, txt_lvl22, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl22, size=resolvedSize)
     label.delete(lbl_lvl23)
     line.delete(ln_lvl23)
     tooClose_lvl23 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29919.83 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29915.98 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl23 := true
     if show_lvl23 and not tooClose_lvl23
-        array.push(activePrices, 29919.83)
-        ln_lvl23 := line.new(bar_index - 10, 29919.83, bar_index, 29919.83, color=color.new(color.purple, 15), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29915.98)
+        ln_lvl23 := line.new(bar_index - 10, 29915.98, bar_index, 29915.98, color=col_lvl23, width=lineWidthInput, extend=extend.both)
         txt_lvl23 = showPctInput ? "GEX 5 0DTE  1%" : "GEX 5 0DTE"
-        lbl_lvl23 := label.new(bar_index + offsetBars, 29919.83, txt_lvl23, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.purple, 15), size=resolvedSize)
+        lbl_lvl23 := label.new(bar_index + offsetBars, 29915.98, txt_lvl23, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl23, size=resolvedSize)
     label.delete(lbl_lvl24)
     line.delete(ln_lvl24)
     tooClose_lvl24 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(29417.04 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(29413.25 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl24 := true
     if show_lvl24 and not tooClose_lvl24
-        array.push(activePrices, 29417.04)
-        ln_lvl24 := line.new(bar_index - 10, 29417.04, bar_index, 29417.04, color=color.new(color.yellow, 30), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 29413.25)
+        ln_lvl24 := line.new(bar_index - 10, 29413.25, bar_index, 29413.25, color=col_lvl24, width=lineWidthInput, extend=extend.both)
         txt_lvl24 = showPctInput ? "1D Expected Move High  68%" : "1D Expected Move High"
-        lbl_lvl24 := label.new(bar_index + offsetBars, 29417.04, txt_lvl24, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.yellow, 30), size=resolvedSize)
+        lbl_lvl24 := label.new(bar_index + offsetBars, 29413.25, txt_lvl24, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl24, size=resolvedSize)
     label.delete(lbl_lvl25)
     line.delete(ln_lvl25)
     tooClose_lvl25 = false
     if mergeWithinInput > 0
         for j = 0 to array.size(activePrices) - 1
-            if math.abs(28849.46 - array.get(activePrices, j)) <= mergeWithinInput
+            if math.abs(28845.75 - array.get(activePrices, j)) <= mergeWithinInput
                 tooClose_lvl25 := true
     if show_lvl25 and not tooClose_lvl25
-        array.push(activePrices, 28849.46)
-        ln_lvl25 := line.new(bar_index - 10, 28849.46, bar_index, 28849.46, color=color.new(color.yellow, 30), width=lineWidthInput, extend=extend.both)
+        array.push(activePrices, 28845.75)
+        ln_lvl25 := line.new(bar_index - 10, 28845.75, bar_index, 28845.75, color=col_lvl25, width=lineWidthInput, extend=extend.both)
         txt_lvl25 = showPctInput ? "1D Expected Move Low  68%" : "1D Expected Move Low"
-        lbl_lvl25 := label.new(bar_index + offsetBars, 28849.46, txt_lvl25, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=color.new(color.yellow, 30), size=resolvedSize)
+        lbl_lvl25 := label.new(bar_index + offsetBars, 28845.75, txt_lvl25, xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=col_lvl25, size=resolvedSize)
