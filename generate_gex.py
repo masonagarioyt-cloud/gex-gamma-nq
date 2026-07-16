@@ -46,10 +46,16 @@ SOURCES = [
 ]
 
 DISPLAY_TARGETS = [
-    {"key": "QQQ", "underlying": "QQQ", "price_ticker": None, "native": True},
-    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "native": False},
-    {"key": "SPY", "underlying": "SPY", "price_ticker": None, "native": True},
-    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "native": False},
+    {"key": "QQQ", "underlying": "QQQ", "price_ticker": None, "native": True, "match_key": "QQQ", "display_label": "QQQ"},
+    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "NQ"},
+    {"key": "SPY", "underlying": "SPY", "price_ticker": None, "native": True, "match_key": "SPY", "display_label": "SPY"},
+    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "ES"},
+    # Cross-index projections: scale one index's structure onto the OTHER
+    # index's futures range, purely so it's visually comparable/visible on
+    # that chart. These are NOT native prices - they're a proportional
+    # projection for correlation-checking, and are labeled as such.
+    {"key": "SPYonNQ", "underlying": "SPY", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "SPY proj. on NQ"},
+    {"key": "QQQonES", "underlying": "QQQ", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "QQQ proj. on ES"},
 ]
 
 
@@ -211,6 +217,7 @@ def compute_underlying(options_ticker, today):
 
 def build_levels_for_target(target, underlying_data):
     key = target["key"]
+    label = target["display_label"]
     u = underlying_data
     etf_spot = u["etf_spot"]
 
@@ -227,7 +234,7 @@ def build_levels_for_target(target, underlying_data):
     def add(name, price, pct, color, group):
         if price is None:
             return
-        lv.append({"name": f"{name} ({key})", "price": F(price), "pct": pct, "color": color, "group": group, "source": key})
+        lv.append({"name": f"{name} ({label})", "price": F(price), "pct": pct, "color": color, "group": group, "source": key})
 
     add("Call Wall", u["call_wall"], 100, "color.green", "Level Filters")
     add("Put Wall", u["put_wall"], 100, "color.red", "Level Filters")
@@ -321,8 +328,8 @@ def generate_pine_script(levels, source_meta, generated_at):
 
     lines.append('autoDetectInput = input.bool(false, "Auto-detect chart symbol (hides other assets)", tooltip="OFF by default so you see NQ, QQQ, ES, and SPY levels together on any chart - the whole point of tracking correlated assets. Turn ON if you only want the level set matching your current chart symbol.", group="Source Visibility")')
     for s in source_meta:
-        lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["key"]} Levels", group="Source Visibility")')
-        lines.append(f'matchSym_{s["key"]} = str.contains(syminfo.ticker, "{s["key"]}") or str.contains(syminfo.root, "{s["key"]}")')
+        lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["display_label"]} Levels", group="Source Visibility")')
+        lines.append(f'matchSym_{s["key"]} = str.contains(syminfo.ticker, "{s["match_key"]}") or str.contains(syminfo.root, "{s["match_key"]}")')
         lines.append(f'effectiveShow_{s["key"]} = showSource_{s["key"]} and (not autoDetectInput or matchSym_{s["key"]})')
     lines.append('')
 
@@ -331,12 +338,8 @@ def generate_pine_script(levels, source_meta, generated_at):
         base_name_for_tip = lv["name"].rsplit(" (", 1)[0]
         tip = tooltip_for(base_name_for_tip)
         tooltip_arg = f', tooltip="{tip}"' if tip else ''
-        lines.append(f'show_{ident} = input.bool(true, "{lv["name"]}", group="{lv["group"]}"{tooltip_arg})')
-    lines.append('')
-
-    for i, lv in enumerate(levels):
-        ident = _pine_ident(i)
-        lines.append(f'col_{ident} = input.color({lv["color"]}, "{lv["name"]} Color", group="Colors")')
+        lines.append(f'show_{ident} = input.bool(true, "{lv["name"]}", group="{lv["group"]}", inline="row_{ident}"{tooltip_arg})')
+        lines.append(f'col_{ident} = input.color({lv["color"]}, "", group="{lv["group"]}", inline="row_{ident}")')
     lines.append('')
 
     for i in range(len(levels)):
@@ -393,6 +396,7 @@ def main():
         all_levels.extend(lv)
         source_meta.append({
             "key": target["key"], "underlying": target["underlying"], "native": target["native"],
+            "match_key": target["match_key"], "display_label": target["display_label"],
             "main_expiry": u["main_expiry"], "zero_dte_expiry": u["zero_dte_expiry"],
             "etf_spot": u["etf_spot"], "display_spot": display_spot,
         })
