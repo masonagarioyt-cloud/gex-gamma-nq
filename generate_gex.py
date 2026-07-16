@@ -319,7 +319,7 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
 
-    lines.append('autoDetectInput = input.bool(true, "Auto-detect chart symbol", tooltip="When on, only the level set matching the symbol you have loaded is shown automatically (e.g. an NQ chart shows NQ levels). Turn off to control visibility fully with the toggles below.", group="Source Visibility")')
+    lines.append('autoDetectInput = input.bool(false, "Auto-detect chart symbol (hides other assets)", tooltip="OFF by default so you see NQ, QQQ, ES, and SPY levels together on any chart - the whole point of tracking correlated assets. Turn ON if you only want the level set matching your current chart symbol.", group="Source Visibility")')
     for s in source_meta:
         lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["key"]} Levels", group="Source Visibility")')
         lines.append(f'matchSym_{s["key"]} = str.contains(syminfo.ticker, "{s["key"]}") or str.contains(syminfo.root, "{s["key"]}")')
