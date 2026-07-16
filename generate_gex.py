@@ -45,12 +45,30 @@ def bs_gamma(spot, strike, t_years, iv, r=RISK_FREE_RATE):
 
 
 def pick_expiration(expirations, today):
+    """Pick the nearest expiration STRICTLY AFTER today.
+
+    Deliberately excludes today's own expiry (0DTE) from the "main"
+    calculation. 0DTE options have almost no time value left, which makes
+    their gamma/IV numbers unstable and not representative of broader
+    positioning. 0DTE gets its own separate, explicit calculation elsewhere.
+    """
     dated = sorted(expirations)
     for e in dated:
         exp_date = dt.datetime.strptime(e, "%Y-%m-%d").date()
-        if exp_date >= today:
+        if exp_date > today:
             return e
+    # Fallback: if literally nothing beyond today exists (unlikely), use
+    # the latest available rather than crash.
     return dated[-1] if dated else None
+
+
+def clamp_iv(iv, low=0.05, high=3.0):
+    """Sanity bound implied vol. Yahoo's free feed occasionally returns
+    near-zero or garbage IV for thin/near-expiry contracts, which would
+    otherwise make the expected-move calc collapse to ~0."""
+    if iv is None or iv <= 0 or math.isnan(iv):
+        return 0.20  # reasonable generic fallback
+    return max(low, min(high, iv))
 
 
 def compute_gex_for_expiry(qqq, expiry, spot, today):
@@ -155,8 +173,9 @@ def build_levels(qqq_spot, nq_spot, today):
         if gex_0dte:
             call_res_0dte, put_sup_0dte = wall_levels(gex_0dte)
 
-    # 1-day expected move using nearest-expiry ATM IV as an approximation
-    atm_iv = atm_iv_main or 0.20
+    # 1-day expected move using nearest-expiry ATM IV as an approximation,
+    # clamped to a sane range so a bad/thin IV read can't collapse this to ~0
+    atm_iv = clamp_iv(atm_iv_main)
     em = qqq_spot * atm_iv * math.sqrt(1.0 / 365.0)
     em_low, em_high = qqq_spot - em, qqq_spot + em
 
