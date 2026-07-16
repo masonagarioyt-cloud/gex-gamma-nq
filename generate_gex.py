@@ -346,28 +346,33 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('')
 
     lines.append('var float[] activePrices = array.new_float(0)')
-    lines.append('if barstate.islast')
-    lines.append('    array.clear(activePrices)')
-    for i, lv in enumerate(levels):
-        ident = _pine_ident(i)
-        price = f'{lv["price"]:.2f}'
-        lines.append(f'    label.delete(lbl_{ident})')
-        lines.append(f'    line.delete(ln_{ident})')
-        lines.append(f'    tooClose_{ident} = false')
-        lines.append('    if mergeWithinInput > 0 and array.size(activePrices) > 0')
-        lines.append('        for j = 0 to array.size(activePrices) - 1')
-        lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
-        lines.append(f'                tooClose_{ident} := true')
-        lines.append(f'    if show_{ident} and effectiveShow_{lv["source"]} and not tooClose_{ident}')
-        lines.append(f'        array.push(activePrices, {price})')
-        lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
-        lines.append(f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"')
-        lines.append(
-            f'        lbl_{ident} := label.new(bar_index + offsetBars, {price}, txt_{ident}, '
-            f'xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), '
-            f'textcolor=col_{ident}, size=resolvedSize)'
-        )
-    lines.append('')
+
+    CHUNK_SIZE = 12
+    for chunk_start in range(0, len(levels), CHUNK_SIZE):
+        chunk = list(enumerate(levels))[chunk_start:chunk_start + CHUNK_SIZE]
+        lines.append('if barstate.islast')
+        if chunk_start == 0:
+            lines.append('    array.clear(activePrices)')
+        for i, lv in chunk:
+            ident = _pine_ident(i)
+            price = f'{lv["price"]:.2f}'
+            lines.append(f'    label.delete(lbl_{ident})')
+            lines.append(f'    line.delete(ln_{ident})')
+            lines.append(f'    tooClose_{ident} = false')
+            lines.append('    if mergeWithinInput > 0 and array.size(activePrices) > 0')
+            lines.append('        for j = 0 to array.size(activePrices) - 1')
+            lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
+            lines.append(f'                tooClose_{ident} := true')
+            lines.append(f'    if show_{ident} and effectiveShow_{lv["source"]} and not tooClose_{ident}')
+            lines.append(f'        array.push(activePrices, {price})')
+            lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
+            lines.append(f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"')
+            lines.append(
+                f'        lbl_{ident} := label.new(bar_index + offsetBars, {price}, txt_{ident}, '
+                f'xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), '
+                f'textcolor=col_{ident}, size=resolvedSize)'
+            )
+        lines.append('')
 
     return "\n".join(lines)
 
