@@ -34,7 +34,8 @@ from scipy.stats import norm
 
 RISK_FREE_RATE = 0.05
 CONTRACT_MULTIPLIER = 100
-TOP_N_LEVELS = 7
+TOP_N_LEVELS = 8
+TOP_N_LEVELS_0DTE = 5
 
 
 def bs_gamma(spot, strike, t_years, iv, r=RISK_FREE_RATE):
@@ -168,10 +169,16 @@ def build_levels(qqq_spot, nq_spot, today):
     today_str = today.strftime("%Y-%m-%d")
     zero_dte_expiry = today_str if today_str in expirations else None
     call_res_0dte = put_sup_0dte = None
+    ranked_0dte = []
     if zero_dte_expiry:
         gex_0dte, _, _ = compute_gex_for_expiry(qqq, zero_dte_expiry, qqq_spot, today)
         if gex_0dte:
             call_res_0dte, put_sup_0dte = wall_levels(gex_0dte)
+            ranked_0dte = top_n_ranked(
+                gex_0dte,
+                exclude_strikes={call_res_0dte, put_sup_0dte},
+                n=TOP_N_LEVELS_0DTE,
+            )
 
     # 1-day expected move using nearest-expiry ATM IV as an approximation,
     # clamped to a sane range so a bad/thin IV read can't collapse this to ~0
@@ -195,6 +202,15 @@ def build_levels(qqq_spot, nq_spot, today):
             "price": to_nq(k, qqq_spot, nq_spot),
             "pct": pct,
             "color": "color.new(color.aqua, 10)" if is_call_side else "color.new(color.fuchsia, 10)",
+            "style": "hline.style_dotted",
+        })
+
+    for i, (k, pct, is_call_side) in enumerate(ranked_0dte, start=1):
+        levels.append({
+            "name": f"GEX {i} 0DTE",
+            "price": to_nq(k, qqq_spot, nq_spot),
+            "pct": pct,
+            "color": "color.new(color.blue, 15)" if is_call_side else "color.new(color.purple, 15)",
             "style": "hline.style_dotted",
         })
 
@@ -242,7 +258,7 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
         lines.append(
             f'    lbl_{i} := label.new(bar_index + 3, {lv["price"]:.2f}, '
             f'"{lv["name"]}  {lv["pct"]}%", xloc=xloc.bar_index, '
-            f'style=label.style_label_left, color=color.new(color.black, 100), '
+            f'style=label.style_label_up, color=color.new(color.gray, 75), '
             f'textcolor={lv["color"]}, size=size.small)'
         )
     lines.append('')
