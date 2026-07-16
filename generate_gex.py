@@ -41,8 +41,15 @@ TOP_N_LEVELS_0DTE = 5
 GEX_LEVEL_COLOR = "#ace5dc"
 
 SOURCES = [
-    {"key": "NQ", "options_ticker": "QQQ", "futures_ticker": "NQ=F", "label": "NQ (Nasdaq)"},
-    {"key": "ES", "options_ticker": "SPY", "futures_ticker": "ES=F", "label": "ES (S&P)"},
+    {"underlying": "QQQ", "options_ticker": "QQQ"},
+    {"underlying": "SPY", "options_ticker": "SPY"},
+]
+
+DISPLAY_TARGETS = [
+    {"key": "QQQ", "underlying": "QQQ", "price_ticker": None, "native": True},
+    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "native": False},
+    {"key": "SPY", "underlying": "SPY", "price_ticker": None, "native": True},
+    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "native": False},
 ]
 
 
@@ -159,13 +166,12 @@ def fetch_last_price(ticker_symbol):
     return float(hist["Close"].iloc[-1])
 
 
-def build_levels_for_source(source, today):
-    etf_spot = fetch_last_price(source["options_ticker"])
-    futures_spot = fetch_last_price(source["futures_ticker"])
-    ticker_obj = yf.Ticker(source["options_ticker"])
+def compute_underlying(options_ticker, today):
+    etf_spot = fetch_last_price(options_ticker)
+    ticker_obj = yf.Ticker(options_ticker)
     expirations = ticker_obj.options
     if not expirations:
-        raise RuntimeError(f"No option expirations returned for {source['options_ticker']}.")
+        raise RuntimeError(f"No option expirations returned for {options_ticker}.")
 
     main_expiry = pick_expiration(expirations, today)
     main = compute_expiry_data(ticker_obj, main_expiry, etf_spot, today)
@@ -193,40 +199,57 @@ def build_levels_for_source(source, today):
     em = etf_spot * atm_iv * math.sqrt(1.0 / 365.0)
     em_low, em_high = etf_spot - em, etf_spot + em
 
-    src = source["key"]
+    return {
+        "etf_spot": etf_spot, "main_expiry": main_expiry, "zero_dte_expiry": zero_dte_expiry,
+        "call_wall": call_wall, "put_wall": put_wall, "gamma_flip": gamma_flip,
+        "gamma_wall": gamma_wall, "call_res_oi": call_res_oi, "put_sup_oi": put_sup_oi,
+        "call_res_0dte": call_res_0dte, "put_sup_0dte": put_sup_0dte, "gamma_wall_0dte": gamma_wall_0dte,
+        "call_res_oi_0dte": call_res_oi_0dte, "put_sup_oi_0dte": put_sup_oi_0dte,
+        "ranked": ranked, "ranked_0dte": ranked_0dte, "em_low": em_low, "em_high": em_high,
+    }
+
+
+def build_levels_for_target(target, underlying_data):
+    key = target["key"]
+    u = underlying_data
+    etf_spot = u["etf_spot"]
+
+    if target["native"]:
+        F = lambda p: p
+        display_spot = etf_spot
+    else:
+        futures_spot = fetch_last_price(target["price_ticker"])
+        F = lambda p: to_futures(p, etf_spot, futures_spot)
+        display_spot = futures_spot
+
     lv = []
-    F = lambda p: to_futures(p, etf_spot, futures_spot)
 
     def add(name, price, pct, color, group):
-        lv.append({"name": f"{name} ({src})", "price": F(price), "pct": pct, "color": color, "group": group, "source": src})
+        if price is None:
+            return
+        lv.append({"name": f"{name} ({key})", "price": F(price), "pct": pct, "color": color, "group": group, "source": key})
 
-    add("Call Wall", call_wall, 100, "color.green", "Level Filters")
-    add("Put Wall", put_wall, 100, "color.red", "Level Filters")
-    add("Gamma Flip", gamma_flip, 100, "color.orange", "Level Filters")
-    add("Gamma Wall", gamma_wall, 100, "color.white", "Level Filters")
-    add("Call Resistance (OI)", call_res_oi, 90, "color.lime", "Level Filters")
-    add("Put Support (OI)", put_sup_oi, 90, "color.maroon", "Level Filters")
+    add("Call Wall", u["call_wall"], 100, "color.green", "Level Filters")
+    add("Put Wall", u["put_wall"], 100, "color.red", "Level Filters")
+    add("Gamma Flip", u["gamma_flip"], 100, "color.orange", "Level Filters")
+    add("Gamma Wall", u["gamma_wall"], 100, "color.white", "Level Filters")
+    add("Call Resistance (OI)", u["call_res_oi"], 90, "color.lime", "Level Filters")
+    add("Put Support (OI)", u["put_sup_oi"], 90, "color.maroon", "Level Filters")
+    add("Call Resistance 0DTE", u["call_res_0dte"], 95, "color.new(color.red, 20)", "Level Filters")
+    add("Put Support 0DTE", u["put_sup_0dte"], 95, "color.new(color.teal, 20)", "Level Filters")
+    add("Gamma Wall 0DTE", u["gamma_wall_0dte"], 90, "color.silver", "Level Filters")
+    add("Call Resistance 0DTE (OI)", u["call_res_oi_0dte"], 85, "color.new(color.lime, 20)", "Level Filters")
+    add("Put Support 0DTE (OI)", u["put_sup_oi_0dte"], 85, "color.new(color.maroon, 20)", "Level Filters")
 
-    if call_res_0dte is not None:
-        add("Call Resistance 0DTE", call_res_0dte, 95, "color.new(color.red, 20)", "Level Filters")
-    if put_sup_0dte is not None:
-        add("Put Support 0DTE", put_sup_0dte, 95, "color.new(color.teal, 20)", "Level Filters")
-    if gamma_wall_0dte is not None:
-        add("Gamma Wall 0DTE", gamma_wall_0dte, 90, "color.silver", "Level Filters")
-    if call_res_oi_0dte is not None:
-        add("Call Resistance 0DTE (OI)", call_res_oi_0dte, 85, "color.new(color.lime, 20)", "Level Filters")
-    if put_sup_oi_0dte is not None:
-        add("Put Support 0DTE (OI)", put_sup_oi_0dte, 85, "color.new(color.maroon, 20)", "Level Filters")
-
-    for i, (k, pct) in enumerate(ranked, start=1):
+    for i, (k, pct) in enumerate(u["ranked"], start=1):
         add(f"GEX {i}", k, pct, GEX_LEVEL_COLOR, "GEX Filters")
-    for i, (k, pct) in enumerate(ranked_0dte, start=1):
+    for i, (k, pct) in enumerate(u["ranked_0dte"], start=1):
         add(f"GEX {i} 0DTE", k, pct, GEX_LEVEL_COLOR, "GEX Filters")
 
-    add("1D Expected Move High", em_high, 68, "color.new(color.yellow, 30)", "Level Filters")
-    add("1D Expected Move Low", em_low, 68, "color.new(color.yellow, 30)", "Level Filters")
+    add("1D Expected Move High", u["em_high"], 68, "color.new(color.yellow, 30)", "Level Filters")
+    add("1D Expected Move Low", u["em_low"], 68, "color.new(color.yellow, 30)", "Level Filters")
 
-    return lv, main_expiry, zero_dte_expiry, etf_spot, futures_spot
+    return lv, display_spot
 
 
 def _pine_ident(i):
@@ -270,9 +293,10 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('// ============================================================')
     lines.append(f'// AUTO-GENERATED — {generated_at} UTC')
     for s in source_meta:
-        lines.append(f'// {s["key"]}: from {s["options_ticker"]} options, main expiry {s["main_expiry"]}'
+        conv = f'{s["underlying"]} spot {s["etf_spot"]:.2f} -> {s["key"]} spot {s["display_spot"]:.2f}' if not s["native"] else f'{s["key"]} spot {s["display_spot"]:.2f} (native, no conversion)'
+        lines.append(f'// {s["key"]}: from {s["underlying"]} options, main expiry {s["main_expiry"]}'
                       + (f', 0DTE {s["zero_dte_expiry"]}' if s["zero_dte_expiry"] else ' (no 0DTE today)')
-                      + f' | {s["options_ticker"]} spot {s["etf_spot"]:.2f} -> {s["key"]} spot {s["futures_spot"]:.2f}')
+                      + f' | {conv}')
     lines.append('// FREE-DATA ESTIMATE using the standard public GEX convention')
     lines.append('// (dealers long calls / short puts). NOT SpotGamma\'s or')
     lines.append('// MenthorQ\'s proprietary model.')
@@ -295,8 +319,11 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
 
+    lines.append('autoDetectInput = input.bool(true, "Auto-detect chart symbol", tooltip="When on, only the level set matching the symbol you have loaded is shown automatically (e.g. an NQ chart shows NQ levels). Turn off to control visibility fully with the toggles below.", group="Source Visibility")')
     for s in source_meta:
         lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["key"]} Levels", group="Source Visibility")')
+        lines.append(f'matchSym_{s["key"]} = str.contains(syminfo.ticker, "{s["key"]}") or str.contains(syminfo.root, "{s["key"]}")')
+        lines.append(f'effectiveShow_{s["key"]} = showSource_{s["key"]} and (not autoDetectInput or matchSym_{s["key"]})')
     lines.append('')
 
     for i, lv in enumerate(levels):
@@ -331,7 +358,7 @@ def generate_pine_script(levels, source_meta, generated_at):
         lines.append('        for j = 0 to array.size(activePrices) - 1')
         lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
         lines.append(f'                tooClose_{ident} := true')
-        lines.append(f'    if show_{ident} and showSource_{lv["source"]} and not tooClose_{ident}')
+        lines.append(f'    if show_{ident} and effectiveShow_{lv["source"]} and not tooClose_{ident}')
         lines.append(f'        array.push(activePrices, {price})')
         lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
         lines.append(f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"')
@@ -349,15 +376,20 @@ def main():
     generated_at = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
     today = dt.date.today()
 
+    underlying_cache = {}
+    for source in SOURCES:
+        underlying_cache[source["underlying"]] = compute_underlying(source["options_ticker"], today)
+
     all_levels = []
     source_meta = []
-    for source in SOURCES:
-        lv, main_expiry, zero_dte_expiry, etf_spot, futures_spot = build_levels_for_source(source, today)
+    for target in DISPLAY_TARGETS:
+        u = underlying_cache[target["underlying"]]
+        lv, display_spot = build_levels_for_target(target, u)
         all_levels.extend(lv)
         source_meta.append({
-            "key": source["key"], "options_ticker": source["options_ticker"],
-            "main_expiry": main_expiry, "zero_dte_expiry": zero_dte_expiry,
-            "etf_spot": etf_spot, "futures_spot": futures_spot,
+            "key": target["key"], "underlying": target["underlying"], "native": target["native"],
+            "main_expiry": u["main_expiry"], "zero_dte_expiry": u["zero_dte_expiry"],
+            "etf_spot": u["etf_spot"], "display_spot": display_spot,
         })
 
     pine = generate_pine_script(all_levels, source_meta, generated_at)
@@ -365,7 +397,7 @@ def main():
     with open("output.pine", "w") as f:
         f.write(pine)
 
-    print(f"Generated output.pine with {len(all_levels)} total levels across {len(SOURCES)} sources")
+    print(f"Generated output.pine with {len(all_levels)} total levels across {len(DISPLAY_TARGETS)} display targets")
     for lv in all_levels:
         print(f"  {lv['name']:<32} {lv['price']:.2f}  ({lv['pct']}%)")
 
