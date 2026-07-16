@@ -247,6 +247,37 @@ def _pine_ident(i):
     return f"lvl{i}"
 
 
+def tooltip_for(name):
+    """Plain-language explanation shown as a hover tooltip in the settings
+    panel next to each level's show/hide toggle."""
+    n = name
+    if n == "Call Wall":
+        return "Strike with the largest positive gamma exposure. Often acts like resistance - price stalling or reversing down here is common."
+    if n == "Put Wall":
+        return "Strike with the largest negative gamma exposure. Often acts like support - price stalling or reversing up here is common."
+    if n == "Gamma Flip":
+        return "The price where dealer hedging flips character. Below it, hedging tends to amplify moves (more volatile). Above it, hedging tends to dampen moves (more range-bound). A regime marker, not a wall."
+    if n.startswith("Gamma Wall"):
+        base = "Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction."
+        return base + " Calculated using only today's expiring options." if "0DTE" in n else base
+    if n.startswith("Call Resistance") and "OI" in n:
+        base = "Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure."
+        return base + " Today's expiry only." if "0DTE" in n else base
+    if n.startswith("Put Support") and "OI" in n:
+        base = "Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure."
+        return base + " Today's expiry only." if "0DTE" in n else base
+    if n.startswith("Call Resistance"):
+        return "Same concept as Call Wall, but calculated using only options expiring today (0DTE)."
+    if n.startswith("Put Support"):
+        return "Same concept as Put Wall, but calculated using only options expiring today (0DTE)."
+    if n.startswith("GEX"):
+        base = "A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number)."
+        return base + " Today's expiry only." if "0DTE" in n else base
+    if "Expected Move" in n:
+        return "Estimated 1-day price range based on implied volatility. A statistical estimate, not a hard boundary."
+    return ""
+
+
 def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot, generated_at):
     lines = []
     lines.append('//@version=6')
@@ -269,13 +300,13 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
     lines.append('labelPosInput = input.string("Above", "Label Position", options=["Above", "Below", "Left", "Right"], group="Display")')
     lines.append('offsetBars = input.int(3, "Left/Right Offset (bars)", minval=0, maxval=200, group="Display")')
     lines.append('showPctInput = input.bool(true, "Show % on labels", group="Display")')
-    lines.append('mergeWithinInput = input.float(0.0, "Merge levels within (pts)", minval=0.0, group="Display")')
+    lines.append('mergeWithinInput = input.float(15.0, "Merge levels within (pts)", minval=0.0, tooltip="When two levels land within this many points of each other, only the higher-priority one is shown, to reduce clutter. Set to 0 to show every level.", group="Display")')
     lines.append('lineWidthInput = input.int(3, "Line Width", minval=1, maxval=6, group="Display")')
     lines.append('')
     lines.append('f_labelSize(s) =>')
     lines.append('    s == "Small" ? size.small : s == "Large" ? size.large : size.normal')
     lines.append('f_labelStyle(p) =>')
-    lines.append('    p == "Below" ? label.style_label_down : p == "Left" ? label.style_label_left : p == "Right" ? label.style_label_right : label.style_label_up')
+    lines.append('    p == "Below" ? label.style_label_up : p == "Left" ? label.style_label_right : p == "Right" ? label.style_label_left : label.style_label_down')
     lines.append('resolvedSize = f_labelSize(labelSizeInput)')
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
@@ -283,7 +314,15 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
     # ---- Per-level show/hide toggles, grouped like a Level Filters / GEX Filters panel ----
     for i, lv in enumerate(levels):
         ident = _pine_ident(i)
-        lines.append(f'show_{ident} = input.bool(true, "{lv["name"]}", group="{lv["group"]}")')
+        tip = tooltip_for(lv["name"])
+        tooltip_arg = f', tooltip="{tip}"' if tip else ''
+        lines.append(f'show_{ident} = input.bool(true, "{lv["name"]}", group="{lv["group"]}"{tooltip_arg})')
+    lines.append('')
+
+    # ---- Per-level color pickers, own settings group, defaulting to the computed color ----
+    for i, lv in enumerate(levels):
+        ident = _pine_ident(i)
+        lines.append(f'col_{ident} = input.color({lv["color"]}, "{lv["name"]} Color", group="Colors")')
     lines.append('')
 
     # ---- var line/label declarations ----
@@ -309,14 +348,14 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
         lines.append(f'                tooClose_{ident} := true')
         lines.append(f'    if show_{ident} and not tooClose_{ident}')
         lines.append(f'        array.push(activePrices, {price})')
-        lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color={lv["color"]}, width=lineWidthInput, extend=extend.both)')
+        lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
         lines.append(
             f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"'
         )
         lines.append(
             f'        lbl_{ident} := label.new(bar_index + offsetBars, {price}, txt_{ident}, '
             f'xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), '
-            f'textcolor={lv["color"]}, size=resolvedSize)'
+            f'textcolor=col_{ident}, size=resolvedSize)'
         )
     lines.append('')
 
