@@ -1,10 +1,12 @@
 """
-NQ Gamma Exposure (GEX) Level Generator
------------------------------------------
-Free-data estimate of gamma exposure levels for Nasdaq futures (NQ),
-derived from QQQ options open interest (the closest free, liquid proxy
-for NDX/NQ). Outputs a complete, ready-to-paste TradingView Pine Script
-with the levels hardcoded.
+Multi-Asset Gamma Exposure (GEX) Level Generator — "May Gamma & Gex Levels"
+-----------------------------------------------------------------------------
+Free-data estimate of gamma exposure levels for Nasdaq (NQ) and S&P (ES)
+futures, derived from QQQ and SPY options open interest respectively (the
+closest free, liquid proxies for NDX/NQ and SPX/ES). Outputs a complete,
+ready-to-paste TradingView Pine Script with the levels hardcoded and a
+full settings panel (per-level show/hide, colors, text size/position,
+merge distance, per-source visibility).
 
 IMPORTANT / HONEST LIMITATIONS:
 - Data source is Yahoo Finance's free, unofficial feed (via yfinance).
@@ -14,17 +16,11 @@ IMPORTANT / HONEST LIMITATIONS:
   long calls / short puts). This is the same simplifying assumption used
   by nearly every free GEX calculator. It is NOT SpotGamma's or
   MenthorQ's proprietary model and will not exactly match their numbers.
-- QQQ options are used as a proxy for NDX/NQ, scaled via the live
-  NQ/QQQ price ratio at run time.
+- QQQ/SPY options are used as proxies for NQ/ES, scaled via the live
+  futures/ETF price ratio at run time.
 - "Strength %" on ranked GEX levels is this strike's gamma exposure
-  magnitude relative to the single largest strike found in the chain
-  (100% = the biggest one). It is NOT a probability or a confidence score.
-- "Call Resistance (OI)" / "Put Support (OI)" are based on raw open
-  interest (contract count), a different and complementary metric from
-  the gamma-exposure-based Call Wall / Put Wall.
-- "Gamma Wall" is the strike with the largest TOTAL gamma exposure
-  (calls + puts combined, unsigned) - i.e. where the biggest overall
-  dealer hedging flow is concentrated, regardless of direction.
+  magnitude relative to the single largest strike found in that chain.
+  It is NOT a probability or a confidence score.
 - This script intentionally does NOT attempt to replicate "HVL" (that's
   volume-profile data, a different data source) or "Blind Spots" (an
   undocumented MenthorQ-proprietary concept with no public formula).
@@ -42,6 +38,12 @@ RISK_FREE_RATE = 0.05
 CONTRACT_MULTIPLIER = 100
 TOP_N_LEVELS = 8
 TOP_N_LEVELS_0DTE = 5
+GEX_LEVEL_COLOR = "#ace5dc"
+
+SOURCES = [
+    {"key": "NQ", "options_ticker": "QQQ", "futures_ticker": "NQ=F", "label": "NQ (Nasdaq)"},
+    {"key": "ES", "options_ticker": "SPY", "futures_ticker": "ES=F", "label": "ES (S&P)"},
+]
 
 
 def bs_gamma(spot, strike, t_years, iv, r=RISK_FREE_RATE):
@@ -52,8 +54,8 @@ def bs_gamma(spot, strike, t_years, iv, r=RISK_FREE_RATE):
 
 
 def pick_expiration(expirations, today):
-    """Pick the nearest expiration STRICTLY AFTER today (skips 0DTE
-    noise for the 'main' calculation; 0DTE gets its own separate pass)."""
+    """Nearest expiration STRICTLY AFTER today (skips 0DTE noise for
+    the 'main' calculation; 0DTE gets its own separate pass)."""
     dated = sorted(expirations)
     for e in dated:
         exp_date = dt.datetime.strptime(e, "%Y-%m-%d").date()
@@ -68,20 +70,15 @@ def clamp_iv(iv, low=0.05, high=3.0):
     return max(low, min(high, iv))
 
 
-def compute_expiry_data(qqq, expiry, spot, today):
-    """Returns per-strike GEX, open interest (calls/puts separately),
-    total unsigned gamma exposure, plus time-to-expiry and ATM IV."""
+def compute_expiry_data(ticker_obj, expiry, spot, today):
     exp_date = dt.datetime.strptime(expiry, "%Y-%m-%d").date()
     t_years = max((exp_date - today).days, 0.5) / 365.0
 
-    chain = qqq.option_chain(expiry)
+    chain = ticker_obj.option_chain(expiry)
     calls, puts = chain.calls, chain.puts
     strikes = sorted(set(calls["strike"]).union(set(puts["strike"])))
 
-    gex_by_strike = {}
-    call_oi_by_strike = {}
-    put_oi_by_strike = {}
-    total_gamma_by_strike = {}
+    gex_by_strike, call_oi_by_strike, put_oi_by_strike, total_gamma_by_strike = {}, {}, {}, {}
     atm_iv, atm_diff = None, None
 
     for k in strikes:
@@ -107,12 +104,8 @@ def compute_expiry_data(qqq, expiry, spot, today):
             atm_iv = c_iv if c_iv > 0 else p_iv
 
     return {
-        "gex": gex_by_strike,
-        "call_oi": call_oi_by_strike,
-        "put_oi": put_oi_by_strike,
-        "total_gamma": total_gamma_by_strike,
-        "t_years": t_years,
-        "atm_iv": atm_iv,
+        "gex": gex_by_strike, "call_oi": call_oi_by_strike, "put_oi": put_oi_by_strike,
+        "total_gamma": total_gamma_by_strike, "t_years": t_years, "atm_iv": atm_iv,
     }
 
 
@@ -139,26 +132,13 @@ def top_n_ranked(gex_by_strike, exclude_strikes, n):
     max_abs = max((abs(v) for v in gex_by_strike.values()), default=1.0)
     ranked = sorted(
         ((k, v) for k, v in gex_by_strike.items() if k not in exclude_strikes),
-        key=lambda kv: abs(kv[1]),
-        reverse=True,
+        key=lambda kv: abs(kv[1]), reverse=True,
     )[:n]
     out = []
     for k, v in ranked:
         pct = round(100 * abs(v) / max_abs) if max_abs else 0
-        out.append((k, pct, v >= 0))
+        out.append((k, pct))
     return out
-
-
-def fetch_nq_price():
-    nq = yf.Ticker("NQ=F")
-    hist = nq.history(period="1d")
-    if hist.empty:
-        raise RuntimeError("Could not fetch NQ=F price.")
-    return float(hist["Close"].iloc[-1])
-
-
-def to_nq(price_qqq, qqq_spot, nq_spot):
-    return price_qqq * (nq_spot / qqq_spot)
 
 
 def oi_and_gamma_wall(data):
@@ -168,18 +148,31 @@ def oi_and_gamma_wall(data):
     return call_res_oi, put_sup_oi, gamma_wall
 
 
-def build_levels(qqq_spot, nq_spot, today):
-    qqq = yf.Ticker("QQQ")
-    expirations = qqq.options
+def to_futures(price_etf, etf_spot, futures_spot):
+    return price_etf * (futures_spot / etf_spot)
+
+
+def fetch_last_price(ticker_symbol):
+    hist = yf.Ticker(ticker_symbol).history(period="1d")
+    if hist.empty:
+        raise RuntimeError(f"Could not fetch price for {ticker_symbol}.")
+    return float(hist["Close"].iloc[-1])
+
+
+def build_levels_for_source(source, today):
+    etf_spot = fetch_last_price(source["options_ticker"])
+    futures_spot = fetch_last_price(source["futures_ticker"])
+    ticker_obj = yf.Ticker(source["options_ticker"])
+    expirations = ticker_obj.options
     if not expirations:
-        raise RuntimeError("No QQQ option expirations returned.")
+        raise RuntimeError(f"No option expirations returned for {source['options_ticker']}.")
 
     main_expiry = pick_expiration(expirations, today)
-    main = compute_expiry_data(qqq, main_expiry, qqq_spot, today)
+    main = compute_expiry_data(ticker_obj, main_expiry, etf_spot, today)
     gex_main = main["gex"]
 
     call_wall, put_wall = wall_levels(gex_main)
-    gamma_flip = gamma_flip_level(gex_main, qqq_spot)
+    gamma_flip = gamma_flip_level(gex_main, etf_spot)
     ranked = top_n_ranked(gex_main, exclude_strikes={call_wall, put_wall}, n=TOP_N_LEVELS)
     call_res_oi, put_sup_oi, gamma_wall = oi_and_gamma_wall(main)
 
@@ -189,7 +182,7 @@ def build_levels(qqq_spot, nq_spot, today):
     ranked_0dte = []
     call_res_oi_0dte = put_sup_oi_0dte = gamma_wall_0dte = None
     if zero_dte_expiry:
-        z = compute_expiry_data(qqq, zero_dte_expiry, qqq_spot, today)
+        z = compute_expiry_data(ticker_obj, zero_dte_expiry, etf_spot, today)
         gex_0dte = z["gex"]
         if gex_0dte:
             call_res_0dte, put_sup_0dte = wall_levels(gex_0dte)
@@ -197,69 +190,60 @@ def build_levels(qqq_spot, nq_spot, today):
             call_res_oi_0dte, put_sup_oi_0dte, gamma_wall_0dte = oi_and_gamma_wall(z)
 
     atm_iv = clamp_iv(main["atm_iv"])
-    em = qqq_spot * atm_iv * math.sqrt(1.0 / 365.0)
-    em_low, em_high = qqq_spot - em, qqq_spot + em
+    em = etf_spot * atm_iv * math.sqrt(1.0 / 365.0)
+    em_low, em_high = etf_spot - em, etf_spot + em
 
-    levels = []
-    levels.append({"name": "Call Wall", "price": to_nq(call_wall, qqq_spot, nq_spot), "pct": 100, "color": "color.green", "group": "Level Filters"})
-    levels.append({"name": "Put Wall", "price": to_nq(put_wall, qqq_spot, nq_spot), "pct": 100, "color": "color.red", "group": "Level Filters"})
-    levels.append({"name": "Gamma Flip", "price": to_nq(gamma_flip, qqq_spot, nq_spot), "pct": 100, "color": "color.orange", "group": "Level Filters"})
-    levels.append({"name": "Gamma Wall", "price": to_nq(gamma_wall, qqq_spot, nq_spot), "pct": 100, "color": "color.white", "group": "Level Filters"})
-    levels.append({"name": "Call Resistance (OI)", "price": to_nq(call_res_oi, qqq_spot, nq_spot), "pct": 90, "color": "color.lime", "group": "Level Filters"})
-    levels.append({"name": "Put Support (OI)", "price": to_nq(put_sup_oi, qqq_spot, nq_spot), "pct": 90, "color": "color.maroon", "group": "Level Filters"})
+    src = source["key"]
+    lv = []
+    F = lambda p: to_futures(p, etf_spot, futures_spot)
+
+    def add(name, price, pct, color, group):
+        lv.append({"name": f"{name} ({src})", "price": F(price), "pct": pct, "color": color, "group": group, "source": src})
+
+    add("Call Wall", call_wall, 100, "color.green", "Level Filters")
+    add("Put Wall", put_wall, 100, "color.red", "Level Filters")
+    add("Gamma Flip", gamma_flip, 100, "color.orange", "Level Filters")
+    add("Gamma Wall", gamma_wall, 100, "color.white", "Level Filters")
+    add("Call Resistance (OI)", call_res_oi, 90, "color.lime", "Level Filters")
+    add("Put Support (OI)", put_sup_oi, 90, "color.maroon", "Level Filters")
 
     if call_res_0dte is not None:
-        levels.append({"name": "Call Resistance 0DTE", "price": to_nq(call_res_0dte, qqq_spot, nq_spot), "pct": 95, "color": "color.new(color.red, 20)", "group": "Level Filters"})
+        add("Call Resistance 0DTE", call_res_0dte, 95, "color.new(color.red, 20)", "Level Filters")
     if put_sup_0dte is not None:
-        levels.append({"name": "Put Support 0DTE", "price": to_nq(put_sup_0dte, qqq_spot, nq_spot), "pct": 95, "color": "color.new(color.teal, 20)", "group": "Level Filters"})
+        add("Put Support 0DTE", put_sup_0dte, 95, "color.new(color.teal, 20)", "Level Filters")
     if gamma_wall_0dte is not None:
-        levels.append({"name": "Gamma Wall 0DTE", "price": to_nq(gamma_wall_0dte, qqq_spot, nq_spot), "pct": 90, "color": "color.silver", "group": "Level Filters"})
+        add("Gamma Wall 0DTE", gamma_wall_0dte, 90, "color.silver", "Level Filters")
     if call_res_oi_0dte is not None:
-        levels.append({"name": "Call Resistance 0DTE (OI)", "price": to_nq(call_res_oi_0dte, qqq_spot, nq_spot), "pct": 85, "color": "color.new(color.lime, 20)", "group": "Level Filters"})
+        add("Call Resistance 0DTE (OI)", call_res_oi_0dte, 85, "color.new(color.lime, 20)", "Level Filters")
     if put_sup_oi_0dte is not None:
-        levels.append({"name": "Put Support 0DTE (OI)", "price": to_nq(put_sup_oi_0dte, qqq_spot, nq_spot), "pct": 85, "color": "color.new(color.maroon, 20)", "group": "Level Filters"})
+        add("Put Support 0DTE (OI)", put_sup_oi_0dte, 85, "color.new(color.maroon, 20)", "Level Filters")
 
-    for i, (k, pct, is_call_side) in enumerate(ranked, start=1):
-        levels.append({
-            "name": f"GEX {i}",
-            "price": to_nq(k, qqq_spot, nq_spot),
-            "pct": pct,
-            "color": "color.new(color.aqua, 10)" if is_call_side else "color.new(color.fuchsia, 10)",
-            "group": "GEX Filters",
-        })
+    for i, (k, pct) in enumerate(ranked, start=1):
+        add(f"GEX {i}", k, pct, GEX_LEVEL_COLOR, "GEX Filters")
+    for i, (k, pct) in enumerate(ranked_0dte, start=1):
+        add(f"GEX {i} 0DTE", k, pct, GEX_LEVEL_COLOR, "GEX Filters")
 
-    for i, (k, pct, is_call_side) in enumerate(ranked_0dte, start=1):
-        levels.append({
-            "name": f"GEX {i} 0DTE",
-            "price": to_nq(k, qqq_spot, nq_spot),
-            "pct": pct,
-            "color": "color.new(color.blue, 15)" if is_call_side else "color.new(color.purple, 15)",
-            "group": "GEX Filters",
-        })
+    add("1D Expected Move High", em_high, 68, "color.new(color.yellow, 30)", "Level Filters")
+    add("1D Expected Move Low", em_low, 68, "color.new(color.yellow, 30)", "Level Filters")
 
-    levels.append({"name": "1D Expected Move High", "price": to_nq(em_high, qqq_spot, nq_spot), "pct": 68, "color": "color.new(color.yellow, 30)", "group": "Level Filters"})
-    levels.append({"name": "1D Expected Move Low", "price": to_nq(em_low, qqq_spot, nq_spot), "pct": 68, "color": "color.new(color.yellow, 30)", "group": "Level Filters"})
-
-    return levels, main_expiry, zero_dte_expiry
+    return lv, main_expiry, zero_dte_expiry, etf_spot, futures_spot
 
 
 def _pine_ident(i):
     return f"lvl{i}"
 
 
-def tooltip_for(name):
-    """Plain-language explanation shown as a hover tooltip in the settings
-    panel next to each level's show/hide toggle."""
-    n = name
+def tooltip_for(base_name):
+    n = base_name
     if n == "Call Wall":
-        return "Strike with the largest positive gamma exposure. Often acts like resistance - price stalling or reversing down here is common."
+        return "Strike with the largest positive gamma exposure. Often acts like resistance."
     if n == "Put Wall":
-        return "Strike with the largest negative gamma exposure. Often acts like support - price stalling or reversing up here is common."
+        return "Strike with the largest negative gamma exposure. Often acts like support."
     if n == "Gamma Flip":
-        return "The price where dealer hedging flips character. Below it, hedging tends to amplify moves (more volatile). Above it, hedging tends to dampen moves (more range-bound). A regime marker, not a wall."
+        return "The price where dealer hedging flips character. Below it, hedging tends to amplify moves. Above it, hedging tends to dampen moves. A regime marker, not a wall."
     if n.startswith("Gamma Wall"):
         base = "Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction."
-        return base + " Calculated using only today's expiring options." if "0DTE" in n else base
+        return base + " Today's expiry only." if "0DTE" in n else base
     if n.startswith("Call Resistance") and "OI" in n:
         base = "Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure."
         return base + " Today's expiry only." if "0DTE" in n else base
@@ -267,40 +251,40 @@ def tooltip_for(name):
         base = "Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure."
         return base + " Today's expiry only." if "0DTE" in n else base
     if n.startswith("Call Resistance"):
-        return "Same concept as Call Wall, but calculated using only options expiring today (0DTE)."
+        return "Same concept as Call Wall, using only options expiring today (0DTE)."
     if n.startswith("Put Support"):
-        return "Same concept as Put Wall, but calculated using only options expiring today (0DTE)."
+        return "Same concept as Put Wall, using only options expiring today (0DTE)."
     if n.startswith("GEX"):
-        base = "A strong gamma-exposure strike, ranked by magnitude (not necessarily the single strongest - see the number)."
+        base = "A strong gamma-exposure strike, ranked by magnitude."
         return base + " Today's expiry only." if "0DTE" in n else base
     if "Expected Move" in n:
         return "Estimated 1-day price range based on implied volatility. A statistical estimate, not a hard boundary."
     return ""
 
 
-def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot, generated_at):
+def generate_pine_script(levels, source_meta, generated_at):
     lines = []
     lines.append('//@version=6')
-    lines.append('indicator("NQ GEX Levels (Auto-Generated, Free Data Estimate)", overlay=true, max_lines_count=100, max_labels_count=100)')
+    lines.append('indicator("May Gamma & Gex Levels", overlay=true, max_lines_count=500, max_labels_count=500)')
     lines.append('')
     lines.append('// ============================================================')
     lines.append(f'// AUTO-GENERATED — {generated_at} UTC')
-    lines.append(f'// Source: QQQ options chain (free/unofficial). Main expiry: {main_expiry}' + (f', 0DTE: {zero_dte_expiry}' if zero_dte_expiry else ' (no 0DTE chain available today)'))
-    lines.append(f'// QQQ spot at calc time: {qqq_spot:.2f} | NQ spot at calc time: {nq_spot:.2f}')
+    for s in source_meta:
+        lines.append(f'// {s["key"]}: from {s["options_ticker"]} options, main expiry {s["main_expiry"]}'
+                      + (f', 0DTE {s["zero_dte_expiry"]}' if s["zero_dte_expiry"] else ' (no 0DTE today)')
+                      + f' | {s["options_ticker"]} spot {s["etf_spot"]:.2f} -> {s["key"]} spot {s["futures_spot"]:.2f}')
     lines.append('// FREE-DATA ESTIMATE using the standard public GEX convention')
     lines.append('// (dealers long calls / short puts). NOT SpotGamma\'s or')
-    lines.append('// MenthorQ\'s proprietary model. "Strength %" = this level\'s')
-    lines.append('// magnitude relative to the single strongest strike found.')
+    lines.append('// MenthorQ\'s proprietary model.')
     lines.append('// Paste this whole script over the old version each morning.')
     lines.append('// ============================================================')
     lines.append('')
 
-    # ---- Display settings group ----
     lines.append('labelSizeInput = input.string("Normal", "Labels Text Size", options=["Small", "Normal", "Large"], group="Display")')
     lines.append('labelPosInput = input.string("Above", "Label Position", options=["Above", "Below", "Left", "Right"], group="Display")')
     lines.append('offsetBars = input.int(3, "Left/Right Offset (bars)", minval=0, maxval=200, group="Display")')
     lines.append('showPctInput = input.bool(true, "Show % on labels", group="Display")')
-    lines.append('mergeWithinInput = input.float(15.0, "Merge levels within (pts)", minval=0.0, tooltip="When two levels land within this many points of each other, only the higher-priority one is shown, to reduce clutter. Set to 0 to show every level.", group="Display")')
+    lines.append('mergeWithinInput = input.float(15.0, "Merge levels within (pts)", minval=0.0, tooltip="When two levels land within this many points of each other, only the higher-priority one is shown. Set to 0 to show every level.", group="Display")')
     lines.append('lineWidthInput = input.int(3, "Line Width", minval=1, maxval=6, group="Display")')
     lines.append('')
     lines.append('f_labelSize(s) =>')
@@ -311,28 +295,29 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
 
-    # ---- Per-level show/hide toggles, grouped like a Level Filters / GEX Filters panel ----
+    for s in source_meta:
+        lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["key"]} Levels", group="Source Visibility")')
+    lines.append('')
+
     for i, lv in enumerate(levels):
         ident = _pine_ident(i)
-        tip = tooltip_for(lv["name"])
+        base_name_for_tip = lv["name"].rsplit(" (", 1)[0]
+        tip = tooltip_for(base_name_for_tip)
         tooltip_arg = f', tooltip="{tip}"' if tip else ''
         lines.append(f'show_{ident} = input.bool(true, "{lv["name"]}", group="{lv["group"]}"{tooltip_arg})')
     lines.append('')
 
-    # ---- Per-level color pickers, own settings group, defaulting to the computed color ----
     for i, lv in enumerate(levels):
         ident = _pine_ident(i)
         lines.append(f'col_{ident} = input.color({lv["color"]}, "{lv["name"]} Color", group="Colors")')
     lines.append('')
 
-    # ---- var line/label declarations ----
     for i in range(len(levels)):
         ident = _pine_ident(i)
         lines.append(f'var line ln_{ident} = na')
         lines.append(f'var label lbl_{ident} = na')
     lines.append('')
 
-    # ---- Rebuild everything on the last bar: delete old, redraw active, respecting toggles + merge distance ----
     lines.append('var float[] activePrices = array.new_float(0)')
     lines.append('if barstate.islast')
     lines.append('    array.clear(activePrices)')
@@ -346,12 +331,10 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
         lines.append('        for j = 0 to array.size(activePrices) - 1')
         lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
         lines.append(f'                tooClose_{ident} := true')
-        lines.append(f'    if show_{ident} and not tooClose_{ident}')
+        lines.append(f'    if show_{ident} and showSource_{lv["source"]} and not tooClose_{ident}')
         lines.append(f'        array.push(activePrices, {price})')
         lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
-        lines.append(
-            f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"'
-        )
+        lines.append(f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"')
         lines.append(
             f'        lbl_{ident} := label.new(bar_index + offsetBars, {price}, txt_{ident}, '
             f'xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), '
@@ -366,22 +349,25 @@ def main():
     generated_at = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
     today = dt.date.today()
 
-    qqq_hist = yf.Ticker("QQQ").history(period="1d")
-    if qqq_hist.empty:
-        raise RuntimeError("Could not fetch QQQ spot price.")
-    qqq_spot = float(qqq_hist["Close"].iloc[-1])
+    all_levels = []
+    source_meta = []
+    for source in SOURCES:
+        lv, main_expiry, zero_dte_expiry, etf_spot, futures_spot = build_levels_for_source(source, today)
+        all_levels.extend(lv)
+        source_meta.append({
+            "key": source["key"], "options_ticker": source["options_ticker"],
+            "main_expiry": main_expiry, "zero_dte_expiry": zero_dte_expiry,
+            "etf_spot": etf_spot, "futures_spot": futures_spot,
+        })
 
-    nq_spot = fetch_nq_price()
-
-    levels, main_expiry, zero_dte_expiry = build_levels(qqq_spot, nq_spot, today)
-    pine = generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot, generated_at)
+    pine = generate_pine_script(all_levels, source_meta, generated_at)
 
     with open("output.pine", "w") as f:
         f.write(pine)
 
-    print(f"Generated output.pine with {len(levels)} levels | QQQ {qqq_spot:.2f} -> NQ {nq_spot:.2f}")
-    for lv in levels:
-        print(f"  {lv['name']:<28} {lv['price']:.2f}  ({lv['pct']}%)")
+    print(f"Generated output.pine with {len(all_levels)} total levels across {len(SOURCES)} sources")
+    for lv in all_levels:
+        print(f"  {lv['name']:<32} {lv['price']:.2f}  ({lv['pct']}%)")
 
 
 if __name__ == "__main__":
