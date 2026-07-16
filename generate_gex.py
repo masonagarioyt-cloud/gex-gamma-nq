@@ -342,7 +342,7 @@ def generate_pine_script(levels, main_expiry, zero_dte_expiry, qqq_spot, nq_spot
         lines.append(f'    label.delete(lbl_{ident})')
         lines.append(f'    line.delete(ln_{ident})')
         lines.append(f'    tooClose_{ident} = false')
-        lines.append('    if mergeWithinInput > 0')
+        lines.append('    if mergeWithinInput > 0 and array.size(activePrices) > 0')
         lines.append('        for j = 0 to array.size(activePrices) - 1')
         lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
         lines.append(f'                tooClose_{ident} := true')
