@@ -4,9 +4,15 @@ Multi-Asset Gamma Exposure (GEX) Level Generator — "May Gamma & Gex Levels"
 Free-data estimate of gamma exposure levels for Nasdaq (NQ) and S&P (ES)
 futures, derived from QQQ and SPY options open interest respectively (the
 closest free, liquid proxies for NDX/NQ and SPX/ES). Outputs a complete,
-ready-to-paste TradingView Pine Script with the levels hardcoded and a
-full settings panel (per-level show/hide, colors, text size/position,
-merge distance, per-source visibility).
+ready-to-paste TradingView Pine Script with a settings panel (per-level
+show/hide + color on one row, text size/position, merge distance,
+per-source visibility with auto-detect).
+
+ARCHITECTURE NOTE: Pine Script inputs (input.bool/input.color) must be
+individually declared - they cannot be created in a loop. But everything
+AFTER that (drawing lines/labels, merge-distance suppression) is done with
+shared arrays + a single loop, not unrolled per-level code, to keep total
+script size well under Pine's compiled-size limits.
 
 IMPORTANT / HONEST LIMITATIONS:
 - Data source is Yahoo Finance's free, unofficial feed (via yfinance).
@@ -18,11 +24,12 @@ IMPORTANT / HONEST LIMITATIONS:
   MenthorQ's proprietary model and will not exactly match their numbers.
 - QQQ/SPY options are used as proxies for NQ/ES, scaled via the live
   futures/ETF price ratio at run time.
-- "Strength %" on ranked GEX levels is this strike's gamma exposure
-  magnitude relative to the single largest strike found in that chain.
-  It is NOT a probability or a confidence score.
-- This script intentionally does NOT attempt to replicate "HVL" (that's
-  volume-profile data, a different data source) or "Blind Spots" (an
+- "SPY proj. on NQ" / "QQQ proj. on ES" are NOT native prices - they are
+  one index's gamma structure proportionally scaled onto the OTHER
+  index's futures range, purely so both are visibly comparable on one
+  chart. Clearly labeled as projections, not literal SPY/QQQ prices.
+- This script intentionally does NOT attempt to replicate "HVL" (volume-
+  profile data, a different data source) or "Blind Spots" (an
   undocumented MenthorQ-proprietary concept with no public formula).
 """
 
@@ -36,26 +43,24 @@ from scipy.stats import norm
 
 RISK_FREE_RATE = 0.05
 CONTRACT_MULTIPLIER = 100
-TOP_N_LEVELS = 8
-TOP_N_LEVELS_0DTE = 5
+TOP_N_LEVELS = 5
+TOP_N_LEVELS_0DTE = 3
 GEX_LEVEL_COLOR = "#ace5dc"
+
+# Trimmed to the 4 targets that are actually visible together on a futures
+# chart (NQ/ES scale). Native QQQ/SPY ($700/$640 range) aren't included by
+# default since they're invisible next to NQ/ES's ~$6,000-30,000 range -
+# ask if you want those added back for viewing on a QQQ/SPY chart specifically.
+DISPLAY_TARGETS = [
+    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "match_key": "NQ", "display_label": "NQ"},
+    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "match_key": "ES", "display_label": "ES"},
+    {"key": "SPYonNQ", "underlying": "SPY", "price_ticker": "NQ=F", "match_key": "NQ", "display_label": "SPY proj. on NQ"},
+    {"key": "QQQonES", "underlying": "QQQ", "price_ticker": "ES=F", "match_key": "ES", "display_label": "QQQ proj. on ES"},
+]
 
 SOURCES = [
     {"underlying": "QQQ", "options_ticker": "QQQ"},
     {"underlying": "SPY", "options_ticker": "SPY"},
-]
-
-DISPLAY_TARGETS = [
-    {"key": "QQQ", "underlying": "QQQ", "price_ticker": None, "native": True, "match_key": "QQQ", "display_label": "QQQ"},
-    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "NQ"},
-    {"key": "SPY", "underlying": "SPY", "price_ticker": None, "native": True, "match_key": "SPY", "display_label": "SPY"},
-    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "ES"},
-    # Cross-index projections: scale one index's structure onto the OTHER
-    # index's futures range, purely so it's visually comparable/visible on
-    # that chart. These are NOT native prices - they're a proportional
-    # projection for correlation-checking, and are labeled as such.
-    {"key": "SPYonNQ", "underlying": "SPY", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "SPY proj. on NQ"},
-    {"key": "QQQonES", "underlying": "QQQ", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "QQQ proj. on ES"},
 ]
 
 
@@ -67,8 +72,6 @@ def bs_gamma(spot, strike, t_years, iv, r=RISK_FREE_RATE):
 
 
 def pick_expiration(expirations, today):
-    """Nearest expiration STRICTLY AFTER today (skips 0DTE noise for
-    the 'main' calculation; 0DTE gets its own separate pass)."""
     dated = sorted(expirations)
     for e in dated:
         exp_date = dt.datetime.strptime(e, "%Y-%m-%d").date()
@@ -192,14 +195,12 @@ def compute_underlying(options_ticker, today):
     zero_dte_expiry = today_str if today_str in expirations else None
     call_res_0dte = put_sup_0dte = None
     ranked_0dte = []
-    call_res_oi_0dte = put_sup_oi_0dte = gamma_wall_0dte = None
     if zero_dte_expiry:
         z = compute_expiry_data(ticker_obj, zero_dte_expiry, etf_spot, today)
         gex_0dte = z["gex"]
         if gex_0dte:
             call_res_0dte, put_sup_0dte = wall_levels(gex_0dte)
             ranked_0dte = top_n_ranked(gex_0dte, exclude_strikes={call_res_0dte, put_sup_0dte}, n=TOP_N_LEVELS_0DTE)
-            call_res_oi_0dte, put_sup_oi_0dte, gamma_wall_0dte = oi_and_gamma_wall(z)
 
     atm_iv = clamp_iv(main["atm_iv"])
     em = etf_spot * atm_iv * math.sqrt(1.0 / 365.0)
@@ -209,8 +210,7 @@ def compute_underlying(options_ticker, today):
         "etf_spot": etf_spot, "main_expiry": main_expiry, "zero_dte_expiry": zero_dte_expiry,
         "call_wall": call_wall, "put_wall": put_wall, "gamma_flip": gamma_flip,
         "gamma_wall": gamma_wall, "call_res_oi": call_res_oi, "put_sup_oi": put_sup_oi,
-        "call_res_0dte": call_res_0dte, "put_sup_0dte": put_sup_0dte, "gamma_wall_0dte": gamma_wall_0dte,
-        "call_res_oi_0dte": call_res_oi_0dte, "put_sup_oi_0dte": put_sup_oi_0dte,
+        "call_res_0dte": call_res_0dte, "put_sup_0dte": put_sup_0dte,
         "ranked": ranked, "ranked_0dte": ranked_0dte, "em_low": em_low, "em_high": em_high,
     }
 
@@ -221,13 +221,8 @@ def build_levels_for_target(target, underlying_data):
     u = underlying_data
     etf_spot = u["etf_spot"]
 
-    if target["native"]:
-        F = lambda p: p
-        display_spot = etf_spot
-    else:
-        futures_spot = fetch_last_price(target["price_ticker"])
-        F = lambda p: to_futures(p, etf_spot, futures_spot)
-        display_spot = futures_spot
+    futures_spot = fetch_last_price(target["price_ticker"])
+    F = lambda p: to_futures(p, etf_spot, futures_spot)
 
     lv = []
 
@@ -244,9 +239,6 @@ def build_levels_for_target(target, underlying_data):
     add("Put Support (OI)", u["put_sup_oi"], 90, "color.maroon", "Level Filters")
     add("Call Resistance 0DTE", u["call_res_0dte"], 95, "color.new(color.red, 20)", "Level Filters")
     add("Put Support 0DTE", u["put_sup_0dte"], 95, "color.new(color.teal, 20)", "Level Filters")
-    add("Gamma Wall 0DTE", u["gamma_wall_0dte"], 90, "color.silver", "Level Filters")
-    add("Call Resistance 0DTE (OI)", u["call_res_oi_0dte"], 85, "color.new(color.lime, 20)", "Level Filters")
-    add("Put Support 0DTE (OI)", u["put_sup_oi_0dte"], 85, "color.new(color.maroon, 20)", "Level Filters")
 
     for i, (k, pct) in enumerate(u["ranked"], start=1):
         add(f"GEX {i}", k, pct, GEX_LEVEL_COLOR, "GEX Filters")
@@ -256,7 +248,7 @@ def build_levels_for_target(target, underlying_data):
     add("1D Expected Move High", u["em_high"], 68, "color.new(color.yellow, 30)", "Level Filters")
     add("1D Expected Move Low", u["em_low"], 68, "color.new(color.yellow, 30)", "Level Filters")
 
-    return lv, display_spot
+    return lv, futures_spot
 
 
 def _pine_ident(i):
@@ -272,14 +264,11 @@ def tooltip_for(base_name):
     if n == "Gamma Flip":
         return "The price where dealer hedging flips character. Below it, hedging tends to amplify moves. Above it, hedging tends to dampen moves. A regime marker, not a wall."
     if n.startswith("Gamma Wall"):
-        base = "Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction."
-        return base + " Today's expiry only." if "0DTE" in n else base
+        return "Strike with the single largest TOTAL gamma exposure (calls + puts combined) - the biggest overall hedging pressure point, regardless of direction."
     if n.startswith("Call Resistance") and "OI" in n:
-        base = "Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure."
-        return base + " Today's expiry only." if "0DTE" in n else base
+        return "Strike with the most open call contracts outstanding. A raw positioning measure, separate from gamma exposure."
     if n.startswith("Put Support") and "OI" in n:
-        base = "Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure."
-        return base + " Today's expiry only." if "0DTE" in n else base
+        return "Strike with the most open put contracts outstanding. A raw positioning measure, separate from gamma exposure."
     if n.startswith("Call Resistance"):
         return "Same concept as Call Wall, using only options expiring today (0DTE)."
     if n.startswith("Put Support"):
@@ -300,13 +289,13 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('// ============================================================')
     lines.append(f'// AUTO-GENERATED — {generated_at} UTC')
     for s in source_meta:
-        conv = f'{s["underlying"]} spot {s["etf_spot"]:.2f} -> {s["key"]} spot {s["display_spot"]:.2f}' if not s["native"] else f'{s["key"]} spot {s["display_spot"]:.2f} (native, no conversion)'
         lines.append(f'// {s["key"]}: from {s["underlying"]} options, main expiry {s["main_expiry"]}'
                       + (f', 0DTE {s["zero_dte_expiry"]}' if s["zero_dte_expiry"] else ' (no 0DTE today)')
-                      + f' | {conv}')
-    lines.append('// FREE-DATA ESTIMATE using the standard public GEX convention')
-    lines.append('// (dealers long calls / short puts). NOT SpotGamma\'s or')
-    lines.append('// MenthorQ\'s proprietary model.')
+                      + f' | {s["underlying"]} spot {s["etf_spot"]:.2f} -> {s["key"]} spot {s["display_spot"]:.2f}')
+    lines.append('// FREE-DATA ESTIMATE using the standard public GEX convention.')
+    lines.append('// NOT SpotGamma\'s or MenthorQ\'s proprietary model.')
+    lines.append('// "proj. on" levels are scaled projections for cross-asset')
+    lines.append('// comparison, not literal native prices.')
     lines.append('// Paste this whole script over the old version each morning.')
     lines.append('// ============================================================')
     lines.append('')
@@ -326,13 +315,15 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
 
-    lines.append('autoDetectInput = input.bool(false, "Auto-detect chart symbol (hides other assets)", tooltip="OFF by default so you see NQ, QQQ, ES, and SPY levels together on any chart - the whole point of tracking correlated assets. Turn ON if you only want the level set matching your current chart symbol.", group="Source Visibility")')
+    lines.append('autoDetectInput = input.bool(false, "Auto-detect chart symbol (hides other assets)", tooltip="OFF by default so you see all asset groups together on any chart. Turn ON to only show the level set matching your current chart symbol.", group="Source Visibility")')
     for s in source_meta:
         lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["display_label"]} Levels", group="Source Visibility")')
         lines.append(f'matchSym_{s["key"]} = str.contains(syminfo.ticker, "{s["match_key"]}") or str.contains(syminfo.root, "{s["match_key"]}")')
         lines.append(f'effectiveShow_{s["key"]} = showSource_{s["key"]} and (not autoDetectInput or matchSym_{s["key"]})')
     lines.append('')
 
+    # Per-level inputs: MUST be individually declared (Pine restriction),
+    # but this is the only part of the script that scales per-level now.
     for i, lv in enumerate(levels):
         ident = _pine_ident(i)
         base_name_for_tip = lv["name"].rsplit(" (", 1)[0]
@@ -342,40 +333,51 @@ def generate_pine_script(levels, source_meta, generated_at):
         lines.append(f'col_{ident} = input.color({lv["color"]}, "", group="{lv["group"]}", inline="row_{ident}")')
     lines.append('')
 
-    for i in range(len(levels)):
-        ident = _pine_ident(i)
-        lines.append(f'var line ln_{ident} = na')
-        lines.append(f'var label lbl_{ident} = na')
+    # Everything from here on is SHARED code (arrays + one loop), regardless
+    # of how many levels there are - this is what keeps total script size sane.
+    lines.append('var float[] allPrices = array.new_float(0)')
+    lines.append('var color[] allColors = array.new_color(0)')
+    lines.append('var bool[] allShow = array.new_bool(0)')
+    lines.append('var string[] allTexts = array.new_string(0)')
+    lines.append('var line[] allLines = array.new_line(0)')
+    lines.append('var label[] allLabels = array.new_label(0)')
     lines.append('')
-
-    lines.append('var float[] activePrices = array.new_float(0)')
-
-    CHUNK_SIZE = 12
+    CHUNK_SIZE = 15
     for chunk_start in range(0, len(levels), CHUNK_SIZE):
         chunk = list(enumerate(levels))[chunk_start:chunk_start + CHUNK_SIZE]
-        lines.append('if barstate.islast')
-        if chunk_start == 0:
-            lines.append('    array.clear(activePrices)')
+        lines.append('if barstate.isfirst')
         for i, lv in chunk:
             ident = _pine_ident(i)
             price = f'{lv["price"]:.2f}'
-            lines.append(f'    label.delete(lbl_{ident})')
-            lines.append(f'    line.delete(ln_{ident})')
-            lines.append(f'    tooClose_{ident} = false')
-            lines.append('    if mergeWithinInput > 0 and array.size(activePrices) > 0')
-            lines.append('        for j = 0 to array.size(activePrices) - 1')
-            lines.append(f'            if math.abs({price} - array.get(activePrices, j)) <= mergeWithinInput')
-            lines.append(f'                tooClose_{ident} := true')
-            lines.append(f'    if show_{ident} and effectiveShow_{lv["source"]} and not tooClose_{ident}')
-            lines.append(f'        array.push(activePrices, {price})')
-            lines.append(f'        ln_{ident} := line.new(bar_index - 10, {price}, bar_index, {price}, color=col_{ident}, width=lineWidthInput, extend=extend.both)')
-            lines.append(f'        txt_{ident} = showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"')
-            lines.append(
-                f'        lbl_{ident} := label.new(bar_index + offsetBars, {price}, txt_{ident}, '
-                f'xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), '
-                f'textcolor=col_{ident}, size=resolvedSize)'
-            )
+            txt_expr = f'showPctInput ? "{lv["name"]}  {lv["pct"]}%" : "{lv["name"]}"'
+            lines.append(f'    array.push(allPrices, {price})')
+            lines.append(f'    array.push(allColors, col_{ident})')
+            lines.append(f'    array.push(allShow, show_{ident} and effectiveShow_{lv["source"]})')
+            lines.append(f'    array.push(allTexts, {txt_expr})')
+            lines.append(f'    array.push(allLines, na)')
+            lines.append(f'    array.push(allLabels, na)')
         lines.append('')
+
+    lines.append('var float[] activePrices = array.new_float(0)')
+    lines.append('if barstate.islast')
+    lines.append('    array.clear(activePrices)')
+    lines.append('    for i = 0 to array.size(allPrices) - 1')
+    lines.append('        line.delete(array.get(allLines, i))')
+    lines.append('        label.delete(array.get(allLabels, i))')
+    lines.append('        p = array.get(allPrices, i)')
+    lines.append('        tooClose = false')
+    lines.append('        if mergeWithinInput > 0 and array.size(activePrices) > 0')
+    lines.append('            for j = 0 to array.size(activePrices) - 1')
+    lines.append('                if math.abs(p - array.get(activePrices, j)) <= mergeWithinInput')
+    lines.append('                    tooClose := true')
+    lines.append('        if array.get(allShow, i) and not tooClose')
+    lines.append('            array.push(activePrices, p)')
+    lines.append('            c = array.get(allColors, i)')
+    lines.append('            newLine = line.new(bar_index - 10, p, bar_index, p, color=c, width=lineWidthInput, extend=extend.both)')
+    lines.append('            array.set(allLines, i, newLine)')
+    lines.append('            newLabel = label.new(bar_index + offsetBars, p, array.get(allTexts, i), xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=c, size=resolvedSize)')
+    lines.append('            array.set(allLabels, i, newLabel)')
+    lines.append('')
 
     return "\n".join(lines)
 
@@ -395,7 +397,7 @@ def main():
         lv, display_spot = build_levels_for_target(target, u)
         all_levels.extend(lv)
         source_meta.append({
-            "key": target["key"], "underlying": target["underlying"], "native": target["native"],
+            "key": target["key"], "underlying": target["underlying"],
             "match_key": target["match_key"], "display_label": target["display_label"],
             "main_expiry": u["main_expiry"], "zero_dte_expiry": u["zero_dte_expiry"],
             "etf_spot": u["etf_spot"], "display_spot": display_spot,
@@ -407,6 +409,7 @@ def main():
         f.write(pine)
 
     print(f"Generated output.pine with {len(all_levels)} total levels across {len(DISPLAY_TARGETS)} display targets")
+    print(f"Script size: {len(pine)} characters, {pine.count(chr(10))} lines")
     for lv in all_levels:
         print(f"  {lv['name']:<32} {lv['price']:.2f}  ({lv['pct']}%)")
 
