@@ -35,11 +35,32 @@ IMPORTANT / HONEST LIMITATIONS:
 
 import sys
 import math
+import time
 import datetime as dt
 
 import numpy as np
 import yfinance as yf
 from scipy.stats import norm
+
+RETRY_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 5
+
+
+def with_retries(fn, *args, label="request", **kwargs):
+    """Retries a flaky network call a few times with a short delay before
+    giving up. Yahoo's free feed occasionally times out or hiccups for no
+    real reason - this stops one bad request from failing the whole
+    morning's run."""
+    last_err = None
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            print(f"  [retry] {label} failed (attempt {attempt}/{RETRY_ATTEMPTS}): {e}", file=sys.stderr)
+            if attempt < RETRY_ATTEMPTS:
+                time.sleep(RETRY_DELAY_SECONDS)
+    raise RuntimeError(f"{label} failed after {RETRY_ATTEMPTS} attempts: {last_err}")
 
 RISK_FREE_RATE = 0.05
 CONTRACT_MULTIPLIER = 100
@@ -92,7 +113,7 @@ def compute_expiry_data(ticker_obj, expiry, spot, today):
     exp_date = dt.datetime.strptime(expiry, "%Y-%m-%d").date()
     t_years = max((exp_date - today).days, 0.5) / 365.0
 
-    chain = ticker_obj.option_chain(expiry)
+    chain = with_retries(ticker_obj.option_chain, expiry, label=f"option chain ({expiry})")
     calls, puts = chain.calls, chain.puts
     strikes = sorted(set(calls["strike"]).union(set(puts["strike"])))
 
@@ -171,16 +192,18 @@ def to_futures(price_etf, etf_spot, futures_spot):
 
 
 def fetch_last_price(ticker_symbol):
-    hist = yf.Ticker(ticker_symbol).history(period="1d")
-    if hist.empty:
-        raise RuntimeError(f"Could not fetch price for {ticker_symbol}.")
-    return float(hist["Close"].iloc[-1])
+    def _fetch():
+        hist = yf.Ticker(ticker_symbol).history(period="1d")
+        if hist.empty:
+            raise RuntimeError(f"Could not fetch price for {ticker_symbol}.")
+        return float(hist["Close"].iloc[-1])
+    return with_retries(_fetch, label=f"price fetch ({ticker_symbol})")
 
 
 def compute_underlying(options_ticker, today):
     etf_spot = fetch_last_price(options_ticker)
     ticker_obj = yf.Ticker(options_ticker)
-    expirations = ticker_obj.options
+    expirations = with_retries(lambda: ticker_obj.options, label=f"expirations list ({options_ticker})")
     if not expirations:
         raise RuntimeError(f"No option expirations returned for {options_ticker}.")
 
@@ -233,10 +256,19 @@ def build_levels_for_target(target, underlying_data):
 
     lv = []
 
+    def categorize(name):
+        if name.startswith("Call Wall") or name.startswith("Call Resistance"):
+            return "CallWall"
+        if name.startswith("Put Wall") or name.startswith("Put Support"):
+            return "PutWall"
+        if name.startswith("Gamma Flip"):
+            return "GammaFlip"
+        return "Other"
+
     def add(name, price, pct, color, group):
         if price is None:
             return
-        lv.append({"name": f"{name} ({label})", "price": F(price), "pct": pct, "color": color, "group": group, "source": key})
+        lv.append({"name": f"{name} ({label})", "price": F(price), "pct": pct, "color": color, "group": group, "source": key, "category": categorize(name)})
 
     add("Call Wall", u["call_wall"], 100, "color.green", "Level Filters")
     add("Put Wall", u["put_wall"], 100, "color.red", "Level Filters")
@@ -322,6 +354,12 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('resolvedStyle = f_labelStyle(labelPosInput)')
     lines.append('')
 
+    lines.append('alertsEnabledInput = input.bool(false, "Enable Alerts", tooltip="Master switch. Turn on, then set up a TradingView alert on this indicator with condition \\"Any alert() function call\\" to get pinged.", group="Alerts")')
+    lines.append('alertCallWallInput = input.bool(true, "Alert on Call Wall / Resistance crosses", group="Alerts")')
+    lines.append('alertPutWallInput = input.bool(true, "Alert on Put Wall / Support crosses", group="Alerts")')
+    lines.append('alertGammaFlipInput = input.bool(true, "Alert on Gamma Flip crosses", group="Alerts")')
+    lines.append('alertOtherInput = input.bool(false, "Alert on other levels (GEX ranks, Gamma Wall, Expected Move, etc.)", group="Alerts")')
+    lines.append('')
     lines.append('autoDetectInput = input.bool(true, "Auto-detect chart symbol", tooltip="ON by default: automatically shows the level pair that matches your current chart scale (e.g. NQ + SPY-proj.-on-NQ on an NQ chart, ES + QQQ-proj.-on-ES on an ES chart). Turn OFF to control visibility fully with the toggles below instead.", group="Source Visibility")')
     for s in source_meta:
         lines.append(f'showSource_{s["key"]} = input.bool(true, "Show {s["display_label"]} Levels", group="Source Visibility")')
@@ -348,6 +386,7 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('var string[] allTexts = array.new_string(0)')
     lines.append('var line[] allLines = array.new_line(0)')
     lines.append('var label[] allLabels = array.new_label(0)')
+    lines.append('var string[] allCategories = array.new_string(0)')
     lines.append('')
     CHUNK_SIZE = 15
     for chunk_start in range(0, len(levels), CHUNK_SIZE):
@@ -363,6 +402,7 @@ def generate_pine_script(levels, source_meta, generated_at):
             lines.append(f'    array.push(allTexts, {txt_expr})')
             lines.append(f'    array.push(allLines, na)')
             lines.append(f'    array.push(allLabels, na)')
+            lines.append(f'    array.push(allCategories, "{lv["category"]}")')
         lines.append('')
 
     lines.append('var float[] activePrices = array.new_float(0)')
@@ -384,6 +424,29 @@ def generate_pine_script(levels, source_meta, generated_at):
     lines.append('            array.set(allLines, i, newLine)')
     lines.append('            newLabel = label.new(bar_index + offsetBars, p, array.get(allTexts, i), xloc=xloc.bar_index, style=resolvedStyle, color=color.new(color.black, 100), textcolor=c, size=resolvedSize)')
     lines.append('            array.set(allLabels, i, newLabel)')
+    lines.append('')
+
+    # Alerts: runs every bar (not just barstate.islast) so crosses are caught
+    # live. Manual crossover math (not ta.crossover) because ta.* functions
+    # cannot be called inside a loop in Pine.
+    lines.append('if alertsEnabledInput')
+    lines.append('    for i = 0 to array.size(allPrices) - 1')
+    lines.append('        if array.get(allShow, i)')
+    lines.append('            p = array.get(allPrices, i)')
+    lines.append('            crossedUp = close > p and close[1] <= p')
+    lines.append('            crossedDown = close < p and close[1] >= p')
+    lines.append('            if crossedUp or crossedDown')
+    lines.append('                cat = array.get(allCategories, i)')
+    lines.append('                wantAlert = (cat == "CallWall" and alertCallWallInput) or (cat == "PutWall" and alertPutWallInput) or (cat == "GammaFlip" and alertGammaFlipInput) or (cat == "Other" and alertOtherInput)')
+    lines.append('                if wantAlert')
+    lines.append('                    dirText = crossedUp ? "crossed ABOVE" : "crossed BELOW"')
+    lines.append('                    alert(array.get(allTexts, i) + " " + dirText + " (" + str.tostring(p, format.mintick) + ")", alert.freq_once_per_bar)')
+    lines.append('')
+
+    lines.append('var label freshLabel = na')
+    lines.append('if barstate.islast')
+    lines.append('    label.delete(freshLabel)')
+    lines.append(f'    freshLabel := label.new(bar_index, high, "Data as of {generated_at} UTC", xloc=xloc.bar_index, yloc=yloc.abovebar, style=label.style_label_down, color=color.new(color.gray, 70), textcolor=color.white, size=size.tiny)')
     lines.append('')
 
     return "\n".join(lines)
