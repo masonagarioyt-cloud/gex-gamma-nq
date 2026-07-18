@@ -43,8 +43,8 @@ from scipy.stats import norm
 
 RISK_FREE_RATE = 0.05
 CONTRACT_MULTIPLIER = 100
-TOP_N_LEVELS = 5
-TOP_N_LEVELS_0DTE = 3
+TOP_N_LEVELS = 4
+TOP_N_LEVELS_0DTE = 2
 GEX_LEVEL_COLOR = "#ace5dc"
 
 # Trimmed to the 4 targets that are actually visible together on a futures
@@ -52,10 +52,12 @@ GEX_LEVEL_COLOR = "#ace5dc"
 # default since they're invisible next to NQ/ES's ~$6,000-30,000 range -
 # ask if you want those added back for viewing on a QQQ/SPY chart specifically.
 DISPLAY_TARGETS = [
-    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "match_key": "NQ", "display_label": "NQ"},
-    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "match_key": "ES", "display_label": "ES"},
-    {"key": "SPYonNQ", "underlying": "SPY", "price_ticker": "NQ=F", "match_key": "NQ", "display_label": "SPY proj. on NQ"},
-    {"key": "QQQonES", "underlying": "QQQ", "price_ticker": "ES=F", "match_key": "ES", "display_label": "QQQ proj. on ES"},
+    {"key": "QQQ", "underlying": "QQQ", "price_ticker": None, "native": True, "match_key": "QQQ", "display_label": "QQQ"},
+    {"key": "NQ", "underlying": "QQQ", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "NQ"},
+    {"key": "SPY", "underlying": "SPY", "price_ticker": None, "native": True, "match_key": "SPY", "display_label": "SPY"},
+    {"key": "ES", "underlying": "SPY", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "ES"},
+    {"key": "SPYonNQ", "underlying": "SPY", "price_ticker": "NQ=F", "native": False, "match_key": "NQ", "display_label": "SPY proj. on NQ"},
+    {"key": "QQQonES", "underlying": "QQQ", "price_ticker": "ES=F", "native": False, "match_key": "ES", "display_label": "QQQ proj. on ES"},
 ]
 
 SOURCES = [
@@ -221,8 +223,13 @@ def build_levels_for_target(target, underlying_data):
     u = underlying_data
     etf_spot = u["etf_spot"]
 
-    futures_spot = fetch_last_price(target["price_ticker"])
-    F = lambda p: to_futures(p, etf_spot, futures_spot)
+    if target["native"]:
+        F = lambda p: p
+        display_spot = etf_spot
+    else:
+        futures_spot = fetch_last_price(target["price_ticker"])
+        F = lambda p: to_futures(p, etf_spot, futures_spot)
+        display_spot = futures_spot
 
     lv = []
 
@@ -248,7 +255,7 @@ def build_levels_for_target(target, underlying_data):
     add("1D Expected Move High", u["em_high"], 68, "color.new(color.yellow, 30)", "Level Filters")
     add("1D Expected Move Low", u["em_low"], 68, "color.new(color.yellow, 30)", "Level Filters")
 
-    return lv, futures_spot
+    return lv, display_spot
 
 
 def _pine_ident(i):
